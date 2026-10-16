@@ -19,7 +19,7 @@ export default function TabLayout() {
           paddingBottom: 10,
           paddingTop: 5,
         },
-        headerShown: false, // Escondemos o cabeçalho padrão para desenharmos o nosso depois
+        headerShown: false,
       }}
     >
       <Tabs.Screen
@@ -44,10 +44,10 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="perfil"
+        name="avaliacoes"
         options={{
-          title: 'Perfil',
-          tabBarIcon: ({ color }) => <Ionicons name="person" size={24} color={color} />,
+          title: 'Avaliações',
+          tabBarIcon: ({ color }) => <Ionicons name="document-text" size={24} color={color} />,
         }}
       />
     </Tabs>

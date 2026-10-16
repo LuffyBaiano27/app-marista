@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, StatusBar, Image, Alert}  from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, StatusBar, Image, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { cores } from '../constants/colors';
 import { useRouter } from 'expo-router';
 
 // Importações do nosso Firebase
 import { auth, db } from '../config/firebase';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
 export default function LoginScreen() {
@@ -24,21 +24,16 @@ export default function LoginScreen() {
       const cpfAdmin = "123.456.789-00"; // Simulando o CPF
       const emailAdmin = "admin@marista.com";
 
-      // Aplicando a sua regra de negócio para a senha:
-      // substring(0,3) pega os 3 primeiros digitos. 
-      // nomeAdmin[0] pega a 1ª letra.
       const senhaGerada = `${cpfAdmin.substring(0,3)}@${nomeAdmin[0].toUpperCase()}${nomeAdmin[1].toLowerCase()}`; 
 
-      // 1. Cria o usuário na Autenticação do Firebase
       const userCredential = await createUserWithEmailAndPassword(auth, emailAdmin, senhaGerada);
       const user = userCredential.user;
 
-      // 2. Salva as permissões e dados no Firestore (Banco de dados)
       await setDoc(doc(db, 'usuarios', user.uid), {
         nome: nomeAdmin,
         email: emailAdmin,
         cpf: cpfAdmin,
-        role: 'admin', // Aqui está a chave de tudo!
+        role: 'admin', 
         criadoEm: new Date()
       });
 
@@ -53,10 +48,23 @@ export default function LoginScreen() {
     }
   };
 
-  // FUTURA FUNÇÃO DE LOGIN REAL (Deixando preparada)
-  const fazerLogin = () => {
-    // Por enquanto, só navega. No próximo passo vamos conectar o Firebase Auth aqui.
-    router.replace('/(tabs)');
+  // FUNÇÃO DE LOGIN REAL CONECTADA AO FIREBASE
+  const fazerLogin = async () => {
+    if (!email || !senha) {
+      Alert.alert("Atenção", "Preencha o e-mail e a senha para entrar.");
+      return;
+    }
+
+    try {
+      // Tenta autenticar o usuário no Firebase
+      await signInWithEmailAndPassword(auth, email, senha);
+      
+      // Se a senha estiver correta, navega para o painel principal
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      Alert.alert("Erro de Login", "E-mail ou senha incorretos. Tente novamente.");
+      console.error("Erro no login:", error);
+    }
   };
 
   return (
@@ -154,5 +162,5 @@ const styles = StyleSheet.create({
   textoBtnEntrar: { fontSize: 16, fontWeight: 'bold' },
   rodapeContainer: { position: 'absolute', bottom: 25, alignItems: 'center' },
   rodape: { fontSize: 12 },
-  textoSecreto: { fontSize: 10, marginTop: 4, fontWeight: 'bold' } // Discreto no rodapé
+  textoSecreto: { fontSize: 10, marginTop: 4, fontWeight: 'bold' } 
 });

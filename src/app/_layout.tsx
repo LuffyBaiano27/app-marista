@@ -1,17 +1,20 @@
 import { Stack } from 'expo-router';
-import { StatusBar } from 'react-native';
+import { AuthProvider } from '../contexts/authContext';
 
 export default function RootLayout() {
   return (
-    <>
-      <StatusBar barStyle="light-content" />
+    // O AuthProvider "abraça" o app inteiro. Agora qualquer tela sabe quem está logado!
+    <AuthProvider>
       <Stack screenOptions={{ headerShown: false }}>
-        {/* A tela de login (index.tsx) */}
+        {/* A tela de login (index) */}
         <Stack.Screen name="index" />
         
-        {/* A futura pasta de abas que vamos criar */}
+        {/* As abas internas e telas por cima */}
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="notas" />
+        <Stack.Screen name="chamada" />
+        <Stack.Screen name="perfil" />
       </Stack>
-    </>
+    </AuthProvider>
   );
 }
