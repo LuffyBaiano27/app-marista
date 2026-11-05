@@ -1,56 +1,59 @@
-# Welcome to your Expo app 👋
+# 💜 Violeta - Plataforma de Gestão Educacional
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+O **Violeta** (anteriormente *Marista App*) é um sistema SaaS *white-label* desenvolvido para revolucionar a gestão de instituições de ensino. O aplicativo unifica o controle acadêmico, comunicação institucional e suporte técnico em uma única plataforma, oferecendo interfaces adaptativas baseadas em regras estritas de hierarquia (Administradores, Coordenadores e Professores).
 
-## Get started
+## 🚀 Tecnologias Utilizadas
 
-1. Install dependencies
+*   **Front-end:** React Native com Expo (SDK 51/52) e TypeScript.
+*   **Roteamento:** Expo Router (File-based routing).
+*   **Back-end & BaaS:** Firebase (Authentication, Firestore Database).
+*   **UI/UX:** Estilização nativa (`StyleSheet`), suporte a Dark/Light Mode dinâmico e animações fluidas (`Animated` nativo).
 
-   ```bash
-   npm install
-   ```
+## ✨ Funcionalidades Implementadas (MVP Atual)
 
-2. Start the app
+*   **Autenticação Avançada:** Tela inicial com animações de entrada (Fade-in e Slide-up) e integração em tempo real com o Firebase Auth.
+*   **Arquitetura Baseada em Perfis (RBAC):** Renderização condicional completa de componentes. A interface se transforma organicamente dependendo se o usuário logado é Administrador, Coordenador ou Professor.
+*   **Gestão de Conta e Segurança:**
+    *   Painel centralizado de Meus Dados.
+    *   Módulo de Privacidade e Segurança (Troca de senha, simulação de 2FA e monitoramento de sessões ativas).
+    *   Suporte a compliance de privacidade (LGPD).
+*   **Comunicação Institucional:** Emissão de comunicados em massa por Coordenadores diretamente para o mural de professores.
+*   **Helpdesk Integrado (Suporte de TI):** Professores e Coordenadores podem abrir chamados relatando problemas; Administradores possuem um painel para ler, gerenciar e dar "baixa" nos tickets.
+*   **Ambiente de Desenvolvimento Estruturado:** Atalhos embutidos para simulação ágil de perfis e injeção de dados no banco (Mocks), dispensando trocas constantes de credenciais nos testes de interface.
 
-   ```bash
-   npx expo start
-   ```
+## 🚧 Próximos Passos (To-Do)
 
-In the output, you'll find options to open the app in a
+O escopo visual e estrutural está finalizado. Os próximos ciclos de desenvolvimento focarão em segurança de dados e lógica de nuvem:
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+*   [ ] **Integração Real do Firestore (Dashboard e Turmas):** Substituir as turmas mockadas por queries reais filtradas por dia e professor.
+*   [ ] **Lógica de Chamadas e Assinatura Eletrônica:** Transitar IDs reais de turmas entre rotas, habilitar o "trancamento" imutável de diários após a aula e enviar o registro final para o banco.
+*   [ ] **Infraestrutura e Permissões (Admin):** Ativar o Controle de Acessos (ACL) para aprovar/reprovar cadastros e implementar o painel de Logs de Auditoria.
+*   [ ] **Segurança de Banco de Dados:** Escrever as *Firebase Security Rules* travando as coleções (ex: professores só podem editar turmas vinculadas ao seu UID).
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## 👨‍💻 Equipe de Desenvolvimento
 
-## Get a fresh project
+*   **Larissa Alves**
+*   **Aryane**
+*   **LuffyBaiano** (Tech Lead)
 
-When you're ready, run:
+---
 
-```bash
-npm run reset-project
-```
+## ⚙️ Como Executar o Projeto Localmente
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+1.  **Clone o repositório:**
+    ```bash
+    git clone [https://github.com/SeuUsuario/violeta-app.git](https://github.com/SeuUsuario/violeta-app.git)
+    cd violeta-app
+    ```
 
-### Other setup steps
+2.  **Instale as dependências:**
+    ```bash
+    npm install
+    ```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+3.  **Inicie o servidor local limpando o cache (recomendado para evitar erros de SDK no Expo Go):**
+    ```bash
+    npx expo start -c
+    ```
 
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+4.  Escaneie o QR Code gerado no terminal usando o aplicativo **Expo Go** no Android ou a câmera nativa no iOS.

@@ -137,7 +137,7 @@ export default function DashboardScreen() {
             key={turma.id} 
             style={[styles.cardTurma, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}
             activeOpacity={0.7}
-            onPress={() => console.log(`Abrir turma ${turma.nome}`)}
+            onPress={() => router.push('/chamada')}
           >
             <View style={[styles.iconeTurmaBg, { backgroundColor: tema.botaoPrimario + '20' }]}>
               <Ionicons name="people" size={24} color={tema.botaoPrimario} />
