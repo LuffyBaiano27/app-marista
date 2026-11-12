@@ -16,6 +16,10 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [verSenha, setVerSenha] = useState(false);
+  
+  // ESTADO PARA EXIBIR ERRO DE LOGIN NA TELA
+  const [erroMsg, setErroMsg] = useState('');
+  
   const tema = isDarkMode ? cores.dark : cores.light;
 
   // ANIMAÇÕES NATIVAS DO INÍCIO
@@ -50,12 +54,23 @@ export default function LoginScreen() {
   };
 
   const fazerLogin = async () => {
-    if (!email || !senha) return Alert.alert("Atenção", "Preencha o e-mail e a senha.");
+    if (!email || !senha) return setErroMsg("Preencha o e-mail e a senha.");
+    
+    setErroMsg(''); // Limpa o erro anterior antes de tentar novamente
+    
     try {
       await signInWithEmailAndPassword(auth, email, senha);
       router.replace('/(tabs)');
     } catch (error: any) {
-      Alert.alert("Erro de Login", "Credenciais incorretas.");
+      // Tratamento específico de erros do Firebase Auth
+      if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') {
+        setErroMsg("E-mail ou senha incorretos.");
+      } else if (error.code === 'auth/invalid-email') {
+        setErroMsg("Formato de e-mail inválido.");
+      } else {
+        setErroMsg("Erro de conexão. Tente novamente.");
+        console.error(error); // Ajuda no log do terminal
+      }
     }
   };
 
@@ -99,6 +114,13 @@ export default function LoginScreen() {
         <TouchableOpacity style={styles.btnEsqueci}>
           <Text style={[styles.textoEsqueci, { color: tema.botaoPrimario }]}>Esqueci minha senha</Text>
         </TouchableOpacity>
+
+        {/* EXIBIÇÃO DA MENSAGEM DE ERRO (Se existir) */}
+        {erroMsg ? (
+          <Text style={{ color: '#D32F2F', marginBottom: 15, fontWeight: 'bold', textAlign: 'center' }}>
+            {erroMsg}
+          </Text>
+        ) : null}
 
         <TouchableOpacity style={[styles.btnEntrar, { backgroundColor: tema.botaoPrimario }]} activeOpacity={0.8} onPress={fazerLogin}>
           <Text style={[styles.textoBtnEntrar, { color: tema.textoBotao }]}>Entrar</Text>

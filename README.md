@@ -1,59 +1,65 @@
-# 💜 Violeta - Plataforma de Gestão Educacional
+# 💜 Sistema Violeta - Gestão Educacional
 
-O **Violeta** (anteriormente *Marista App*) é um sistema SaaS *white-label* desenvolvido para revolucionar a gestão de instituições de ensino. O aplicativo unifica o controle acadêmico, comunicação institucional e suporte técnico em uma única plataforma, oferecendo interfaces adaptativas baseadas em regras estritas de hierarquia (Administradores, Coordenadores e Professores).
+O **Sistema Violeta** é um SaaS (Software as a Service) educacional desenvolvido em **React Native (Expo)** focado em modernizar a rotina acadêmica de Professores, Coordenadores e Administradores.
 
 ## 🚀 Tecnologias Utilizadas
+* **Frontend:** React Native, Expo Router, TypeScript
+* **Backend / BaaS:** Firebase (Firestore Database & Authentication)
+* **Estilização:** StyleSheet nativo responsivo, com suporte a Light/Dark Mode
+* **Ícones:** Ionicons (Expo Vector Icons)
 
-*   **Front-end:** React Native com Expo (SDK 51/52) e TypeScript.
-*   **Roteamento:** Expo Router (File-based routing).
-*   **Back-end & BaaS:** Firebase (Authentication, Firestore Database).
-*   **UI/UX:** Estilização nativa (`StyleSheet`), suporte a Dark/Light Mode dinâmico e animações fluidas (`Animated` nativo).
+## 📌 Funcionalidades Principais (MVP)
+- **Dashboard Personalizado:** Grelha de aulas diária baseada no perfil do usuário e dia da semana.
+- **Diário de Classe Digital:** Registo de frequência offline-first/online, com bloqueio automático anti-fraude pós-assinatura.
+- **Central de Consultas (Arquivo Morto):** Histórico retroativo de chamadas e desempenho de alunos agrupado por pastas (Acordeão).
+- **Gestão de Suporte Técnico (Help Desk):** Professores podem abrir chamados de infraestrutura que são monitorados em tempo real pela TI/Admin.
+- **Controle de Acessos (ACL):** Experiências de navegação diferentes de acordo com a permissão (Professor, Coordenador, Admin).
+- *Em Breve: Lançamento de Avaliações (Notas Bimestrais), Comunicados Oficiais e Autenticação Real.*
 
-## ✨ Funcionalidades Implementadas (MVP Atual)
+## 💻 Como Rodar o Projeto
 
-*   **Autenticação Avançada:** Tela inicial com animações de entrada (Fade-in e Slide-up) e integração em tempo real com o Firebase Auth.
-*   **Arquitetura Baseada em Perfis (RBAC):** Renderização condicional completa de componentes. A interface se transforma organicamente dependendo se o usuário logado é Administrador, Coordenador ou Professor.
-*   **Gestão de Conta e Segurança:**
-    *   Painel centralizado de Meus Dados.
-    *   Módulo de Privacidade e Segurança (Troca de senha, simulação de 2FA e monitoramento de sessões ativas).
-    *   Suporte a compliance de privacidade (LGPD).
-*   **Comunicação Institucional:** Emissão de comunicados em massa por Coordenadores diretamente para o mural de professores.
-*   **Helpdesk Integrado (Suporte de TI):** Professores e Coordenadores podem abrir chamados relatando problemas; Administradores possuem um painel para ler, gerenciar e dar "baixa" nos tickets.
-*   **Ambiente de Desenvolvimento Estruturado:** Atalhos embutidos para simulação ágil de perfis e injeção de dados no banco (Mocks), dispensando trocas constantes de credenciais nos testes de interface.
+1. Clone o repositório:
+   ```bash
+   git clone [https://github.com/SEU-USUARIO/violeta.git](https://github.com/SEU-USUARIO/violeta.git)
 
-## 🚧 Próximos Passos (To-Do)
+   Acesse a pasta do projeto:
+Acesse a pasta do projeto:
 
-O escopo visual e estrutural está finalizado. Os próximos ciclos de desenvolvimento focarão em segurança de dados e lógica de nuvem:
+Bash
+cd violeta
+Instale as dependências:
 
-*   [ ] **Integração Real do Firestore (Dashboard e Turmas):** Substituir as turmas mockadas por queries reais filtradas por dia e professor.
-*   [ ] **Lógica de Chamadas e Assinatura Eletrônica:** Transitar IDs reais de turmas entre rotas, habilitar o "trancamento" imutável de diários após a aula e enviar o registro final para o banco.
-*   [ ] **Infraestrutura e Permissões (Admin):** Ativar o Controle de Acessos (ACL) para aprovar/reprovar cadastros e implementar o painel de Logs de Auditoria.
-*   [ ] **Segurança de Banco de Dados:** Escrever as *Firebase Security Rules* travando as coleções (ex: professores só podem editar turmas vinculadas ao seu UID).
+Bash
+npm install
+Inicie o servidor Expo:
 
-## 👨‍💻 Equipe de Desenvolvimento
+Bash
+npx expo start
+🔐 Configuração do Firebase
+Para rodar este projeto, é necessário criar um arquivo .env na raiz do projeto com as chaves do seu projeto Firebase, seguindo o modelo abaixo:
 
-*   **Larissa Alves**
-*   **Aryane**
-*   **LuffyBaiano** (Tech Lead)
+Snippet de código
+EXPO_PUBLIC_FIREBASE_API_KEY=sua_api_key
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=seu_domain
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=seu_project_id
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=seu_bucket
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=seu_sender
+EXPO_PUBLIC_FIREBASE_APP_ID=seu_app_id
+👩‍💻 Equipe de Desenvolvimento
+LuffyBaiano (Infraestrutura, Banco de Dados, React Native)
 
----
+Larissa Alves
 
-## ⚙️ Como Executar o Projeto Localmente
+Aryane
 
-1.  **Clone o repositório:**
-    ```bash
-    git clone [https://github.com/SeuUsuario/violeta-app.git](https://github.com/SeuUsuario/violeta-app.git)
-    cd violeta-app
-    ```
+© 2026 Sistema Violeta. Todos os direitos reservados. Salvador, BA.
 
-2.  **Instale as dependências:**
-    ```bash
-    npm install
-    ```
 
-3.  **Inicie o servidor local limpando o cache (recomendado para evitar erros de SDK no Expo Go):**
-    ```bash
-    npx expo start -c
-    ```
+### Comandos Git para salvar o teu progresso
 
-4.  Escaneie o QR Code gerado no terminal usando o aplicativo **Expo Go** no Android ou a câmera nativa no iOS.
+Abre o terminal na raiz do teu projeto e executa a seguinte sequência:
+
+```bash
+git add .
+git commit -m "feat: checklist do MVP, atualizacao de telas de perfil, chamadas, historico e integracao firebase"
+git push origin main

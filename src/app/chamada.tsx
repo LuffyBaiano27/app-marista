@@ -1,33 +1,98 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  View, Text, StyleSheet, FlatList, TouchableOpacity, useColorScheme, TextInput, KeyboardAvoidingView, Platform, Modal, Alert
+  View, Text, StyleSheet, FlatList, TouchableOpacity, useColorScheme, TextInput, KeyboardAvoidingView, Platform, Modal, Alert, ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { cores } from '../constants/colors';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+
+// FIREBASE
+import { doc, getDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 export default function ChamadaScreen() {
   const router = useRouter();
+  const { id } = useLocalSearchParams(); 
   const isDarkMode = useColorScheme() === 'dark';
   const tema = isDarkMode ? cores.dark : cores.light;
 
-  // MOCKS DA AULA
-  const isAulaDupla = true;
+  // ESTADOS FIREBASE DA TURMA E DA CHAMADA
+  const [turma, setTurma] = useState<any>(null);
+  const [carregandoDados, setCarregandoDados] = useState(true);
+  const [chamadaIdRealizada, setChamadaIdRealizada] = useState<string | null>(null);
+
+  // MOCKS DA AULA 
+  const isAulaDupla = true; 
   const isAdmin = false; 
-  const horario1 = "07:00 às 07:50";
-  const horario2 = "07:50 às 08:40";
+  const horario1 = turma?.horario || "Carregando...";
+  const horario2 = "08:40 às 09:30"; 
   
   const [chamadaConcluida, setChamadaConcluida] = useState(false);
   const [modalAssinatura, setModalAssinatura] = useState(false);
   const [senhaConfirmacao, setSenhaConfirmacao] = useState('');
 
-  // ESTADO DA LISTA DE ALUNOS
+  // ESTADO DA LISTA DE ALUNOS (Inicialmente mockado, mas será sobrescrito se houver chamada no banco)
   const [alunos, setAlunos] = useState([
     { id: '1', nome: 'Ana Carolina', presencas: [true, true], obs: '', mostrarObs: false },
     { id: '2', nome: 'Carlos Eduardo', presencas: [true, true], obs: '', mostrarObs: false },
     { id: '3', nome: 'Mariana Silva', presencas: [true, true], obs: '', mostrarObs: false },
     { id: '4', nome: 'João Pedro', presencas: [true, true], obs: '', mostrarObs: false },
   ]);
+
+  // FUNÇÃO AUXILIAR PARA FORMATAR A DATA (YYYY-MM-DD)
+  const getDataDeHoje = () => {
+    const hoje = new Date();
+    // Ajuste simples para o fuso horário (exemplo) ou usar biblioteca se necessário
+    return hoje.toISOString().split('T')[0]; 
+  };
+
+  // BUSCAR DADOS DA TURMA E VERIFICAR SE JÁ HOUVE CHAMADA HOJE
+  useEffect(() => {
+    const buscarDadosBase = async () => {
+      if (!id) return;
+      setCarregandoDados(true);
+      try {
+        // 1. Buscar a Turma
+        const docRef = doc(db, 'turmas', id as string);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          setTurma(docSnap.data());
+        }
+
+        // 2. Verificar se JÁ EXISTE uma chamada gravada HOJE para esta turma
+        const dataHoje = getDataDeHoje();
+        const chamadasRef = collection(db, 'chamadas');
+        const q = query(chamadasRef, 
+          where('turmaId', '==', id),
+          where('dataChamadaFormatada', '==', dataHoje) // Usamos um formato simples YYYY-MM-DD
+        );
+        
+        const querySnapshot = await getDocs(q);
+        
+        if (!querySnapshot.empty) {
+          // Já existe uma chamada hoje! Vamos carregar os dados e bloquear a tela.
+          const chamadaRealizada = querySnapshot.docs[0].data();
+          setChamadaIdRealizada(querySnapshot.docs[0].id);
+          setChamadaConcluida(true);
+          
+          // Mapeamos a estrutura do banco de volta para o estado local, garantindo que 'mostrarObs' fica falso por defeito
+          if (chamadaRealizada.alunos && chamadaRealizada.alunos.length > 0) {
+              setAlunos(chamadaRealizada.alunos.map((a: any) => ({
+                  ...a,
+                  mostrarObs: false // Apenas controle de UI
+              })));
+          }
+        }
+      } catch (error) {
+        console.error("Erro ao buscar dados básicos:", error);
+      } finally {
+        setCarregandoDados(false);
+      }
+    };
+
+    buscarDadosBase();
+  }, [id]);
 
   const alternarPresenca = (alunoId: string, aulaIndex: number) => {
     if (chamadaConcluida && !isAdmin) return; 
@@ -50,14 +115,46 @@ export default function ChamadaScreen() {
     setAlunos(prev => prev.map(a => a.id === alunoId ? { ...a, obs: texto } : a));
   };
 
-  const confirmarAssinatura = () => {
+  const confirmarAssinatura = async () => {
     if (senhaConfirmacao.trim() === '') {
-      Alert.alert("Erro", "Digite sua senha para assinar o diário.");
+      if (Platform.OS === 'web') window.alert("Erro\nDigite sua senha para assinar o diário.");
+      else Alert.alert("Erro", "Digite sua senha para assinar o diário.");
       return;
     }
-    setChamadaConcluida(true);
-    setModalAssinatura(false);
-    Alert.alert("Diário Assinado", "A chamada foi registrada e bloqueada com sucesso.");
+    
+    setCarregandoDados(true);
+    try {
+      // Cria um registro oficial na coleção 'chamadas'
+      const novaChamadaData = {
+        turmaId: id,
+        disciplina: turma?.disciplina || 'Desconhecida',
+        dataChamada: new Date().toISOString(),
+        dataChamadaFormatada: getDataDeHoje(), // Facilita a query diária!
+        assinaturaProf: true,
+        alunos: alunos.map(a => ({
+          id: a.id,
+          nome: a.nome,
+          presencas: a.presencas,
+          obs: a.obs
+        }))
+      };
+
+      await addDoc(collection(db, 'chamadas'), novaChamadaData);
+
+      setChamadaConcluida(true);
+      setModalAssinatura(false);
+      
+      if (Platform.OS === 'web') window.alert("Diário Assinado!\nA chamada foi registrada e bloqueada com sucesso.");
+      else Alert.alert("Diário Assinado", "A chamada foi registrada e bloqueada com sucesso.");
+      
+    } catch (error: any) {
+      console.error("Erro ao salvar chamada:", error);
+      if (Platform.OS === 'web') window.alert("Erro\nFalha ao salvar a chamada.");
+      else Alert.alert("Erro", "Falha ao salvar a chamada no banco de dados.");
+    } finally {
+        setCarregandoDados(false);
+        setSenhaConfirmacao('');
+    }
   };
 
   const renderAluno = ({ item }: { item: any }) => {
@@ -139,7 +236,13 @@ export default function ChamadaScreen() {
           <View style={{ flex: 1 }}>
             <Text style={[styles.titulo, { color: tema.textoLogo }]}>Registro de Frequência</Text>
             <View style={styles.subtituloRow}>
-              <Text style={[styles.subtitulo, { color: tema.textoLogo, opacity: 0.9 }]}>6º Ano A • Matemática</Text>
+              {carregandoDados ? (
+                <ActivityIndicator size="small" color={tema.textoLogo} style={{ alignSelf: 'flex-start' }} />
+              ) : (
+                <Text style={[styles.subtitulo, { color: tema.textoLogo, opacity: 0.9 }]}>
+                  {turma ? `${turma.nome} • ${turma.disciplina || turma.materia}` : 'Turma não encontrada'}
+                </Text>
+              )}
             </View>
           </View>
         </View>
@@ -169,15 +272,22 @@ export default function ChamadaScreen() {
         </View>
       </View>
 
-      <FlatList
-        data={alunos}
-        keyExtractor={(item) => item.id}
-        renderItem={renderAluno}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      />
+      {carregandoDados ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <ActivityIndicator size="large" color={tema.botaoPrimario} />
+              <Text style={{ marginTop: 10, color: tema.textoSecundario }}>Sincronizando diário...</Text>
+          </View>
+      ) : (
+        <FlatList
+          data={alunos}
+          keyExtractor={(item) => item.id}
+          renderItem={renderAluno}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
-      {!chamadaConcluida && (
+      {(!chamadaConcluida && !carregandoDados) && (
         <View style={[styles.rodapeContainer, { backgroundColor: tema.fundoTopo }]}>
           <View style={styles.resumoRow}>
             <Text style={[styles.textoResumo, { color: tema.textoLogo }]}>Presentes: {alunos.filter(a => isAulaDupla ? (a.presencas[0] || a.presencas[1]) : a.presencas[0]).length}</Text>
