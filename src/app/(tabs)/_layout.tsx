@@ -26,28 +26,28 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Início',
-          tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
+          tabBarIcon: ({ focused }) => <Ionicons name="home" size={24} color={focused ? tema.botaoPrimario : tema.textoSecundario} />,
         }}
       />
       <Tabs.Screen
         name="turmas"
         options={{
           title: 'Turmas',
-          tabBarIcon: ({ color }) => <Ionicons name="people" size={24} color={color} />,
+          tabBarIcon: ({ focused }) => <Ionicons name="people" size={24} color={focused ? tema.botaoPrimario : tema.textoSecundario} />,
         }}
       />
       <Tabs.Screen
         name="historico"
         options={{
           title: 'Histórico',
-          tabBarIcon: ({ color }) => <Ionicons name="time" size={24} color={color} />,
+          tabBarIcon: ({ focused }) => <Ionicons name="time" size={24} color={focused ? tema.botaoPrimario : tema.textoSecundario} />,
         }}
       />
       <Tabs.Screen
         name="avaliacoes"
         options={{
           title: 'Avaliações',
-          tabBarIcon: ({ color }) => <Ionicons name="document-text" size={24} color={color} />,
+          tabBarIcon: ({ focused }) => <Ionicons name="document-text" size={24} color={focused ? tema.botaoPrimario : tema.textoSecundario} />,
         }}
       />
     </Tabs>

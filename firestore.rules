@@ -1,0 +1,136 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function autenticado() {
+      return request.auth != null;
+    }
+
+    function texto(valor, limite) {
+      return valor is string && valor.size() > 0 && valor.size() <= limite
+        && valor.matches('.*[^\\s].*');
+    }
+
+    function perfilValido(perfil) {
+      return perfil.ativo is bool && perfil.ativo == true
+        && perfil.role is string
+        && perfil.role in ['professor', 'coordenador', 'admin']
+        && texto(perfil.nome, 120);
+    }
+
+    function temPerfil(role) {
+      return autenticado()
+        && perfilValido(get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data)
+        && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.role == role;
+    }
+
+    function administrador() {
+      return temPerfil('admin');
+    }
+
+    function usuarioAtivo() {
+      return temPerfil('professor') || temPerfil('coordenador') || administrador();
+    }
+
+    function referenciaPerfil(uid, role) {
+      let perfil = get(/databases/$(database)/documents/usuarios/$(uid)).data;
+      return uid is string && uid.size() > 0
+        && perfilValido(perfil) && perfil.role == role;
+    }
+
+    function vinculoTurma(turma) {
+      return (temPerfil('professor') && turma.professorId == request.auth.uid)
+        || (temPerfil('coordenador') && turma.coordenadorIds.hasAny([request.auth.uid]));
+    }
+
+    function podeLerTurma(turma) {
+      return administrador() || vinculoTurma(turma);
+    }
+
+    function podeLerChamada(chamada) {
+      return administrador()
+        || (autenticado() && chamada.turmaId is string
+          && vinculoTurma(get(/databases/$(database)/documents/turmas/$(chamada.turmaId)).data));
+    }
+
+    // Quatro coordenadores: margem para os limites de documentos e expressões.
+    // get repetido do mesmo documento pode ser atendido pelo cache das regras.
+    function coordenadoresValidos(ids) {
+      return ids is list && ids.size() <= 4 && ids.toSet().size() == ids.size()
+        && (ids.size() <= 0 || referenciaPerfil(ids[0], 'coordenador'))
+        && (ids.size() <= 1 || referenciaPerfil(ids[1], 'coordenador'))
+        && (ids.size() <= 2 || referenciaPerfil(ids[2], 'coordenador'))
+        && (ids.size() <= 3 || referenciaPerfil(ids[3], 'coordenador'))
+        ;
+    }
+
+    function turmaValida(dados) {
+      return dados.keys().hasAll(['nome', 'disciplina', 'professorId',
+          'coordenadorIds', 'ativo', 'diaId', 'horario', 'turno', 'criadoEm', 'atualizadoEm'])
+        && dados.keys().hasOnly(['nome', 'disciplina', 'professorId',
+          'coordenadorIds', 'ativo', 'diaId', 'horario', 'turno', 'criadoEm',
+          'atualizadoEm', 'alunos', 'professorNome', 'status'])
+        && texto(dados.nome, 120) && texto(dados.disciplina, 120)
+        && dados.ativo is bool
+        && dados.diaId is int && dados.diaId >= 1 && dados.diaId <= 5
+        && texto(dados.horario, 80) && texto(dados.turno, 40)
+        && dados.criadoEm is timestamp && dados.atualizadoEm == request.time
+        && (!('alunos' in dados) || (dados.alunos is int && dados.alunos >= 0))
+        && (!('professorNome' in dados) || texto(dados.professorNome, 120))
+        && (!('status' in dados) || texto(dados.status, 40))
+        && referenciaPerfil(dados.professorId, 'professor')
+        && coordenadoresValidos(dados.coordenadorIds);
+    }
+
+    match /usuarios/{uid} {
+      // Exceção diagnóstica: o próprio perfil não concede acesso operacional.
+      allow get: if (autenticado() && request.auth.uid == uid) || administrador();
+      allow list: if administrador();
+      allow create, delete: if false;
+      // Allowlist de diferenças protege também campos privilegiados futuros.
+      allow update: if usuarioAtivo() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['nome', 'atualizadoEm'])
+        && texto(request.resource.data.nome, 120)
+        && request.resource.data.atualizadoEm == request.time;
+    }
+
+    match /turmas/{turmaId} {
+      allow read: if podeLerTurma(resource.data);
+      allow create: if administrador() && turmaValida(request.resource.data)
+        && request.resource.data.criadoEm == request.time;
+      allow update: if administrador() && turmaValida(request.resource.data)
+        && request.resource.data.criadoEm == resource.data.criadoEm;
+      allow delete: if false;
+    }
+
+    match /chamadas/{chamadaId} {
+      allow read: if podeLerChamada(resource.data);
+      // Pendente: matrícula, ocorrência, unicidade e janela de registro.
+      // Negação intencional; não liberar uma lista de presenças arbitrária.
+      allow create, update, delete: if false;
+    }
+
+    match /chamados_suporte/{chamadoId} {
+      allow read: if administrador() || (usuarioAtivo()
+        && resource.data.solicitanteUid == request.auth.uid);
+      allow create: if usuarioAtivo()
+        && request.resource.data.keys().hasAll(['solicitanteUid', 'descricao', 'status', 'criadoEm'])
+        && request.resource.data.keys().hasOnly(['solicitanteUid', 'descricao', 'status', 'criadoEm'])
+        && request.resource.data.solicitanteUid == request.auth.uid
+        && texto(request.resource.data.descricao, 4000)
+        && request.resource.data.status == 'pendente'
+        && request.resource.data.criadoEm == request.time;
+      allow update: if administrador() && resource.data.status == 'pendente'
+        && request.resource.data.status == 'resolvido'
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'resolvidoPorUid', 'resolvidoEm'])
+        && request.resource.data.resolvidoPorUid == request.auth.uid
+        && request.resource.data.resolvidoEm == request.time;
+      allow delete: if false;
+    }
+
+    match /{documento=**} {
+      allow read, write: if false;
+    }
+  }
+}

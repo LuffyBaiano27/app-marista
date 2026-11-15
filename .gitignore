@@ -45,3 +45,14 @@ example
 # generated native folders
 /ios
 /android
+# Firebase: artefatos locais, logs e credenciais privilegiadas
+.firebase/
+firebase-debug*.log
+firestore-debug*.log
+ui-debug*.log
+*-firebase-adminsdk-*.json
+service-account*.json
+
+# Variantes de ambiente; apenas exemplo sem segredos pode ser versionado
+.env.*
+!.env.example

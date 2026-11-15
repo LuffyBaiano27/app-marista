@@ -1,17 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Animated, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { cores } from '../constants/colors';
-import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 // Firebase
-import { auth, db } from '../config/firebase';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { auth } from '../config/firebase';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 
 export default function LoginScreen() {
-  const router = useRouter(); 
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
@@ -33,26 +30,6 @@ export default function LoginScreen() {
     ]).start();
   }, []);
 
-  const criarAdminMaster = async () => {
-    try {
-      const nomeAdmin = "Luffy Baiano";
-      const cpfAdmin = "123.456.789-00"; 
-      const emailAdmin = "admin@violeta.com";
-      const senhaGerada = `${cpfAdmin.substring(0,3)}@${nomeAdmin[0].toUpperCase()}${nomeAdmin[1].toLowerCase()}`; 
-
-      const userCredential = await createUserWithEmailAndPassword(auth, emailAdmin, senhaGerada);
-      const user = userCredential.user;
-
-      await setDoc(doc(db, 'usuarios', user.uid), {
-        nome: nomeAdmin, email: emailAdmin, cpf: cpfAdmin, role: 'admin', criadoEm: new Date()
-      });
-
-      Alert.alert("Violeta Admin Criado! 🚀", `E-mail: ${emailAdmin}\nSenha: ${senhaGerada}`);
-    } catch (error: any) {
-      Alert.alert("Erro ao criar Admin", error.message);
-    }
-  };
-
   const fazerLogin = async () => {
     if (!email || !senha) return setErroMsg("Preencha o e-mail e a senha.");
     
@@ -60,7 +37,7 @@ export default function LoginScreen() {
     
     try {
       await signInWithEmailAndPassword(auth, email, senha);
-      router.replace('/(tabs)');
+      // O layout libera as rotas somente após validar a sessão e o perfil.
     } catch (error: any) {
       // Tratamento específico de erros do Firebase Auth
       if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') {
@@ -126,10 +103,9 @@ export default function LoginScreen() {
           <Text style={[styles.textoBtnEntrar, { color: tema.textoBotao }]}>Entrar</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.rodapeContainer} onPress={criarAdminMaster}>
+        <View style={styles.rodapeContainer}>
           <Text style={[styles.rodape, { color: tema.textoSecundario }]}>Plataforma Violeta ©</Text>
-          <Text style={[styles.textoSecreto, { color: tema.botaoPrimario }]}>[Criar Admin]</Text>
-        </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -155,5 +131,4 @@ const styles = StyleSheet.create({
   textoBtnEntrar: { fontSize: 16, fontWeight: 'bold' },
   rodapeContainer: { position: 'absolute', bottom: 30, alignItems: 'center' },
   rodape: { fontSize: 12, opacity: 0.7 },
-  textoSecreto: { fontSize: 10, marginTop: 4, fontWeight: 'bold' } 
 });

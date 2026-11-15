@@ -1,0 +1,27 @@
+{
+  "projectId": "demo-violeta-tests",
+  "somenteEmulador": true,
+  "usuarios": {
+    "teste-professor-a": { "nome": "Professor de Teste A", "role": "professor", "ativo": true },
+    "teste-professor-b": { "nome": "Professor de Teste B", "role": "professor", "ativo": true },
+    "teste-coordenador-a": { "nome": "Coordenador de Teste A", "role": "coordenador", "ativo": true },
+    "teste-coordenador-b": { "nome": "Coordenador de Teste B", "role": "coordenador", "ativo": true },
+    "teste-admin": { "nome": "Administrador de Teste", "role": "admin", "ativo": true },
+    "teste-inativo": { "nome": "Usuário de Teste Inativo", "role": "professor", "ativo": false },
+    "teste-legado": { "nome": "Usuário de Teste Legado", "role": "professor" },
+    "teste-invalido": { "nome": "Usuário de Teste Inválido", "role": "desconhecido", "ativo": true }
+  },
+  "turmas": {
+    "teste-turma-a": { "nome": "Turma de Teste A", "disciplina": "Disciplina de Teste", "professorId": "teste-professor-a", "coordenadorIds": ["teste-coordenador-a"], "ativo": true, "diaId": 1, "horario": "07:00 às 07:50", "turno": "Matutino" },
+    "teste-turma-b": { "nome": "Turma de Teste B", "disciplina": "Disciplina de Teste", "professorId": "teste-professor-b", "coordenadorIds": [], "ativo": true, "diaId": 2, "horario": "07:00 às 07:50", "turno": "Matutino" },
+    "teste-turma-legada": { "nome": "Turma Legada de Teste", "professorId": "prof_3" }
+  },
+  "chamadasLegadas": {
+    "teste-chamada-a": { "turmaId": "teste-turma-a", "dataChamada": "2026-01-05T12:00:00.000Z", "dataChamadaFormatada": "2026-01-05", "assinaturaProf": true, "alunos": [] },
+    "teste-chamada-orfa": { "turmaId": "teste-turma-inexistente", "alunos": [] }
+  },
+  "chamadosSuporteLegados": {
+    "teste-suporte-a": { "solicitanteUid": "teste-professor-a", "descricao": "Solicitação sintética", "status": "pendente" },
+    "teste-suporte-sem-uid": { "solicitante": "Solicitante sintético", "descricao": "Solicitação legada sintética", "status": "pendente" }
+  }
+}
