@@ -1,65 +1,50 @@
-# 💜 Sistema Violeta - Gestão Educacional
+# Sistema Violeta
 
-O **Sistema Violeta** é um SaaS (Software as a Service) educacional desenvolvido em **React Native (Expo)** focado em modernizar a rotina acadêmica de Professores, Coordenadores e Administradores.
+MVP acadêmico de gestão educacional para uma instituição, desenvolvido com React Native, Expo Router, TypeScript, Firebase Authentication e Cloud Firestore.
 
-## 🚀 Tecnologias Utilizadas
-* **Frontend:** React Native, Expo Router, TypeScript
-* **Backend / BaaS:** Firebase (Firestore Database & Authentication)
-* **Estilização:** StyleSheet nativo responsivo, com suporte a Light/Dark Mode
-* **Ícones:** Ionicons (Expo Vector Icons)
+## Estado atual
 
-## 📌 Funcionalidades Principais (MVP)
-- **Dashboard Personalizado:** Grelha de aulas diária baseada no perfil do usuário e dia da semana.
-- **Diário de Classe Digital:** Registo de frequência offline-first/online, com bloqueio automático anti-fraude pós-assinatura.
-- **Central de Consultas (Arquivo Morto):** Histórico retroativo de chamadas e desempenho de alunos agrupado por pastas (Acordeão).
-- **Gestão de Suporte Técnico (Help Desk):** Professores podem abrir chamados de infraestrutura que são monitorados em tempo real pela TI/Admin.
-- **Controle de Acessos (ACL):** Experiências de navegação diferentes de acordo com a permissão (Professor, Coordenador, Admin).
-- *Em Breve: Lançamento de Avaliações (Notas Bimestrais), Comunicados Oficiais e Autenticação Real.*
+- Login/logout reais, restauração de sessão, identidade em usuarios/{uid} e proteção de rotas.
+- Acesso operacional exige perfil válido e ativo. Professor consulta turmas por professorId; coordenador por coordenadorIds; administrador ativo tem o escopo institucional documentado.
+- Início/Turmas usam dados autorizados, grade semanal e calendário America/Bahia.
+- Histórico e diários existentes são somente leitura, limitados às turmas autorizadas.
+- Suporte tem leitura por UID e serviços de criação/resolução testados; suas ações permanecem desabilitadas na interface.
+- Regras de autorização locais foram validadas no emulador. Isso não comprova que estejam publicadas: publicação depende de autorização e verificação próprias.
 
-## 💻 Como Rodar o Projeto
+Criação/assinatura de chamadas, avaliações, notas, recuperação de senha e demais fluxos incompletos não estão disponíveis. O modal de notificações do Início ainda contém uma demonstração local sem persistência; não representa eventos reais. Consulte o [relatório de estabilização](docs/arquitetura/estabilizacao-etapa-g.md).
 
-1. Clone o repositório:
-   ```bash
-   git clone [https://github.com/SEU-USUARIO/violeta.git](https://github.com/SEU-USUARIO/violeta.git)
+## Executar localmente
 
-   Acesse a pasta do projeto:
-Acesse a pasta do projeto:
+Com Node e as dependências do projeto já disponíveis:
 
-Bash
-cd violeta
-Instale as dependências:
+```sh
+npm start
+```
 
-Bash
-npm install
-Inicie o servidor Expo:
+O manifesto atual utiliza Expo 58. Não atualizar dependências ou regenerar o lockfile incidentalmente. Para um ambiente novo, a instalação deve seguir a revisão do package-lock.json e o procedimento aprovado pela equipe.
 
-Bash
-npx expo start
-🔐 Configuração do Firebase
-Para rodar este projeto, é necessário criar um arquivo .env na raiz do projeto com as chaves do seu projeto Firebase, seguindo o modelo abaixo:
+A configuração atual do cliente Firebase está em src/config/firebase.js; não há leitura de variáveis .env implementada. Ela aponta para o projeto compartilhado: não executar scripts de carga, migração ou testes de escrita nesse projeto. Identificadores públicos do cliente não substituem regras de segurança. Nunca incluir chaves privadas, contas de serviço, senhas ou credenciais de ferramentas no repositório.
 
-Snippet de código
-EXPO_PUBLIC_FIREBASE_API_KEY=sua_api_key
-EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=seu_domain
-EXPO_PUBLIC_FIREBASE_PROJECT_ID=seu_project_id
-EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=seu_bucket
-EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=seu_sender
-EXPO_PUBLIC_FIREBASE_APP_ID=seu_app_id
-👩‍💻 Equipe de Desenvolvimento
-LuffyBaiano (Infraestrutura, Banco de Dados, React Native)
+## Verificações
 
-Larissa Alves
+```sh
+./node_modules/.bin/tsc --noEmit
+git diff --check
+```
 
-Aryane
+Os comandos dos testes locais estão em [tests/seguranca-f1/README.md](tests/seguranca-f1/README.md). A suíte do emulador e os requisitos das ferramentas isoladas estão em [tests/seguranca-f2/README.md](tests/seguranca-f2/README.md). Não exigem login no Firebase: usam apenas projeto demo e dados sintéticos. Não executar testes paralelos contra o mesmo banco de emulador.
 
-© 2026 Sistema Violeta. Todos os direitos reservados. Salvador, BA.
+## Arquitetura e segurança
 
+- [Contratos de dados](docs/arquitetura/contratos-dados.md)
+- [Matriz de permissões e provisionamento](docs/arquitetura/permissoes-seguranca.md)
+- [Regras efetivas, testes, publicação e reversão](docs/arquitetura/seguranca-etapa-f2.md)
+- [Relatório final de estabilização e pendências](docs/arquitetura/estabilizacao-etapa-g.md)
 
-### Comandos Git para salvar o teu progresso
+Os documentos A–F registram a evolução. Para o estado atual, prevalecem F2/G: chamadas sem gravações, até quatro coordenadores por turma e observação do perfil em tempo real desde F1. Não publicar regras junto com alterações do aplicativo sem revisão do projeto, dos dados legados e da versão cliente.
 
-Abre o terminal na raiz do teu projeto e executa a seguinte sequência:
+## Equipe
 
-```bash
-git add .
-git commit -m "feat: checklist do MVP, atualizacao de telas de perfil, chamadas, historico e integracao firebase"
-git push origin main
+LuffyBaiano (infraestrutura, banco de dados e React Native), Larissa Alves e Aryane.
+
+© 2026 Sistema Violeta. Salvador, BA. Consulte LICENSE.

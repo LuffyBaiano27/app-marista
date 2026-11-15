@@ -1,474 +1,82 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, ScrollView, Alert, Modal, TextInput, KeyboardAvoidingView, Platform, FlatList } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, ScrollView, Alert, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { cores } from '../constants/colors';
 import { useRouter } from 'expo-router';
-
-// FIREBASE
-import { collection, addDoc, getDocs, updateDoc, doc, query } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { useAuth } from '../contexts/authContext';
+import { nomesPerfis, type IdentidadeUsuario } from '../types/usuario';
+import { useLeituraAcademica } from '../hooks/use-leitura-academica';
+import { listarChamadosSuporte } from '../services/suporte';
+import { FUSO_ACADEMICO } from '../utils/calendario';
+
+const consultar = (identidade: IdentidadeUsuario, vigente: () => boolean) => listarChamadosSuporte(db, identidade, vigente);
 
 export default function PerfilScreen() {
   const router = useRouter();
-  const isDarkMode = useColorScheme() === 'dark';
-  const tema = isDarkMode ? cores.dark : cores.light;
-
-  const [cargoUsuario, setCargoUsuario] = useState('Professor'); 
-  const [sincronizando, setSincronizando] = useState(false);
-
-  const usuario = {
-    nome: 'Luffy Baiano',
-    email: 'admin@violeta.com',
-    cargo: cargoUsuario, 
-    iniciais: 'LB'
+  const tema = useColorScheme() === 'dark' ? cores.dark : cores.light;
+  const { usuario, dadosPerfil, encerrarSessao } = useAuth();
+  const { dados, erro, carregando, atualizar } = useLeituraAcademica(consultar);
+  const [saindo, setSaindo] = useState(false);
+  const [erroLogout, setErroLogout] = useState<string | null>(null);
+  const nome = dadosPerfil?.nome || usuario?.displayName?.trim() || 'Nome não informado';
+  const partes = nome.split(/\s+/).filter(Boolean);
+  const iniciais = dadosPerfil?.nome ? `${partes[0][0]}${partes.length > 1 ? partes[partes.length - 1][0] : ''}`.toUpperCase() : '?';
+  const admin = dadosPerfil?.ativo === true && dadosPerfil.role === 'admin';
+  const sair = async () => {
+    if (saindo) return;
+    setSaindo(true); setErroLogout(null);
+    try { await encerrarSessao(); }
+    catch { setSaindo(false); setErroLogout('Não foi possível encerrar a sessão. Tente novamente.'); }
   };
-
-  const [modalDados, setModalDados] = useState(false);
-  const [modalPrivacidade, setModalPrivacidade] = useState(false);
-  const [modalVersao, setModalVersao] = useState(false);
-  const [modalAjuda, setModalAjuda] = useState(false);
-  const [modalAviso, setModalAviso] = useState(false);
-  const [modalAdminChamados, setModalAdminChamados] = useState(false);
-  
-  // ESTADOS DO PERFIL
-  const [formDados, setFormDados] = useState({
-    nome: usuario.nome, dataNascimento: '27/09/2003', endereco: 'Salvador, BA'
-  });
-  
-  // ESTADOS DE SEGURANÇA E PREFERÊNCIAS
-  const [senhaAtual, setSenhaAtual] = useState('');
-  const [novaSenha, setNovaSenha] = useState('');
-  const [tamanhoFonte, setTamanhoFonte] = useState('Média'); // Pequena, Média, Grande
-
-  // ESTADOS DE SUPORTE E AVISOS
-  const [textoChamado, setTextoChamado] = useState('');
-  const [tituloAviso, setTituloAviso] = useState('');
-  const [mensagemAviso, setMensagemAviso] = useState('');
-  
-  const [chamadoSelecionado, setChamadoSelecionado] = useState<any>(null);
-  const [chamados, setChamados] = useState<any[]>([]);
-
-  const buscarChamados = async () => {
-    try {
-      const q = query(collection(db, 'chamados_suporte'));
-      const snap = await getDocs(q);
-      const lista: any[] = [];
-      snap.forEach(d => lista.push({ id: d.id, ...d.data() }));
-      
-      lista.sort((a, b) => {
-        if (a.status !== b.status) return a.status === 'pendente' ? -1 : 1;
-        return b.timestamp - a.timestamp;
-      });
-      
-      setChamados(lista);
-    } catch (error) {
-      console.error("Erro ao buscar chamados:", error);
-    }
-  };
-
-  useEffect(() => {
-    buscarChamados();
-  }, [cargoUsuario, modalAdminChamados]);
-
-  const handleVoltar = () => {
-    if (router.canGoBack()) router.back();
-    else router.replace('/(tabs)');
-  };
-
-  const handleLogout = () => {
+  const confirmarSaida = () => {
     if (Platform.OS === 'web') {
-      if (window.confirm("Deseja sair do sistema Violeta?")) router.replace('/');
-    } else {
-      Alert.alert("Encerrar Sessão", "Deseja sair do sistema Violeta?", [
-        { text: "Cancelar", style: "cancel" },
-        { text: "Sair", style: "destructive", onPress: () => router.replace('/') }
-      ]);
-    }
+      if (window.confirm('Deseja sair do sistema Violeta?')) void sair();
+    } else Alert.alert('Encerrar sessão', 'Deseja sair do sistema Violeta?', [
+      { text: 'Cancelar', style: 'cancel' }, { text: 'Sair', style: 'destructive', onPress: () => { void sair(); } },
+    ]);
   };
-
-  const handleSalvarDados = () => {
-    if (Platform.OS === 'web') window.alert("Sucesso!\nSeus dados foram atualizados no sistema.");
-    else Alert.alert("Sucesso", "Seus dados foram atualizados no sistema.");
-    setModalDados(false);
-  };
-  
-  const handleSalvarPreferencias = () => {
-    if (senhaAtual && !novaSenha) {
-       Platform.OS === 'web' ? window.alert("Preencha a nova senha.") : Alert.alert("Aviso", "Preencha a nova senha.");
-       return;
-    }
-    
-    Platform.OS === 'web' ? window.alert("Sucesso!\nPreferências e segurança atualizadas.") : Alert.alert("Sucesso", "Preferências e segurança atualizadas.");
-    setSenhaAtual('');
-    setNovaSenha('');
-    setModalPrivacidade(false);
-  };
-
-  const handleAlertaDesenvolvimento = (recurso: string) => {
-    if (Platform.OS === 'web') window.alert(`Em Desenvolvimento\nMódulo: ${recurso}`);
-    else Alert.alert("Em Desenvolvimento", `Módulo: ${recurso}`);
-  };
-
-  const handleEnviarChamado = async () => {
-    if (!textoChamado.trim()) {
-      Platform.OS === 'web' ? window.alert("Descreva o problema.") : Alert.alert("Atenção", "Descreva o problema.");
-      return;
-    }
-    
-    try {
-      const agora = new Date();
-      await addDoc(collection(db, 'chamados_suporte'), {
-        solicitante: `${usuario.nome} (${usuario.cargo})`,
-        data: agora.toLocaleDateString('pt-BR'),
-        hora: agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        descricao: textoChamado,
-        status: 'pendente',
-        timestamp: agora.getTime()
-      });
-      
-      if (Platform.OS === 'web') window.alert("Sucesso!\nChamado enviado para a TI.");
-      else Alert.alert("Sucesso", "Chamado enviado para a TI.");
-      
-      setModalAjuda(false);
-      setTextoChamado('');
-      buscarChamados(); 
-    } catch (error: any) {
-      Platform.OS === 'web' ? window.alert("Erro: " + error.message) : Alert.alert("Erro", error.message);
-    }
-  };
-
-  const resolverChamado = async (id: string) => {
-    try {
-      await updateDoc(doc(db, 'chamados_suporte', id), { status: 'resolvido' });
-      setChamados(prev => prev.map(c => c.id === id ? { ...c, status: 'resolvido' } : c));
-      setChamadoSelecionado(null);
-      if (Platform.OS === 'web') window.alert("Sucesso!\nChamado finalizado e arquivado!");
-      else Alert.alert("Sucesso", "Chamado finalizado e arquivado!");
-    } catch (error: any) {
-      Platform.OS === 'web' ? window.alert("Erro ao resolver chamado.") : Alert.alert("Erro", "Não foi possível resolver o chamado.");
-    }
-  };
-
-  const handleInjetarDados = async () => {
-    if (sincronizando) return; 
-    setSincronizando(true);
-
-    const turmasMock = [
-      { nome: '6º Ano A', disciplina: 'Matemática', alunos: 32, horario: '07:00 às 07:50', turno: 'Matutino', diaId: 1, status: 'pendente', professorNome: 'Luffy Baiano', professorId: 'prof_1' },
-      { nome: '7º Ano B', disciplina: 'Matemática', alunos: 28, horario: '07:50 às 08:40', turno: 'Matutino', diaId: 2, status: 'pendente', professorNome: 'Luffy Baiano', professorId: 'prof_1' },
-      { nome: '8º Ano A', disciplina: 'História', alunos: 30, horario: '09:00 às 09:50', turno: 'Matutino', diaId: 3, status: 'pendente', professorNome: 'Carlos Eduardo', professorId: 'prof_2' },
-      { nome: '9º Ano C', disciplina: 'Física', alunos: 25, horario: '10:10 às 11:00', turno: 'Matutino', diaId: 1, status: 'pendente', professorNome: 'Mariana Silva', professorId: 'prof_3' },
-      { nome: '1º Ano Médio', disciplina: 'Matemática', alunos: 35, horario: '11:00 às 11:50', turno: 'Matutino', diaId: 4, status: 'pendente', professorNome: 'Luffy Baiano', professorId: 'prof_1' },
-      { nome: '2º Ano Médio', disciplina: 'Física', alunos: 30, horario: '14:00 às 14:50', turno: 'Vespertino', diaId: 5, status: 'pendente', professorNome: 'Mariana Silva', professorId: 'prof_3' }
-    ];
-  
-    try {
-      for (const turma of turmasMock) {
-        await addDoc(collection(db, 'turmas'), turma);
-      }
-      if (Platform.OS === 'web') window.alert("Sucesso!\nTurmas inseridas com professores.");
-      else Alert.alert("Sucesso!", "Turmas inseridas com professores.");
-    } catch (error: any) {
-      if (Platform.OS === 'web') window.alert("Erro\n" + error.message);
-      else Alert.alert("Erro", error.message);
-    } finally {
-      setSincronizando(false); 
-    }
-  };
-
-  const MenuOption = ({ icone, titulo, subtitulo = null, corIcone = tema.textoSecundario, danger = false, onPress, desativado = false }: any) => (
-    <TouchableOpacity style={[styles.menuItem, { borderBottomColor: tema.borda, opacity: desativado ? 0.5 : 1 }]} activeOpacity={0.7} onPress={onPress} disabled={desativado}>
-      <View style={[styles.iconContainer, { backgroundColor: danger ? '#FFEBEE' : tema.inputBackground }]}>
-        <Ionicons name={icone} size={20} color={danger ? '#C62828' : corIcone} />
-      </View>
-      <View style={styles.menuTextContainer}>
-        <Text style={[styles.menuTitle, { color: danger ? '#C62828' : tema.textoPrincipal }]}>{titulo}</Text>
-        {subtitulo && <Text style={[styles.menuSubtitle, { color: tema.textoSecundario }]}>{subtitulo}</Text>}
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={tema.textoSecundario} opacity={0.5} />
-    </TouchableOpacity>
-  );
-
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView style={[styles.container, { backgroundColor: tema.fundoBase }]} showsVerticalScrollIndicator={false}>
-        
-        <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
-          <View style={styles.headerTopRow}>
-            <TouchableOpacity onPress={handleVoltar} style={styles.btnVoltar}><Ionicons name="arrow-back" size={26} color={tema.textoLogo} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => setCargoUsuario(cargoUsuario === 'Professor' ? 'Coordenador' : cargoUsuario === 'Coordenador' ? 'Admin' : 'Professor')} style={styles.btnToggleCargo}>
-              <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>Simular Perfil</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.avatarContainer}><Text style={styles.avatarText}>{usuario.iniciais}</Text></View>
-          <Text style={[styles.nomeUsuario, { color: tema.textoLogo }]}>{usuario.nome}</Text>
-          <View style={[styles.badgeCargo, { backgroundColor: cargoUsuario === 'Admin' ? '#D32F2F' : cargoUsuario === 'Coordenador' ? '#E65100' : 'rgba(255,255,255,0.2)' }]}><Text style={styles.textoBadge}>{usuario.cargo}</Text></View>
-          <Text style={[styles.emailUsuario, { color: tema.textoLogo }]}>{usuario.email}</Text>
+    <ScrollView style={[styles.container, { backgroundColor: tema.fundoBase }]}>
+      <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
+        <View style={styles.headerTopRow}><TouchableOpacity accessibilityLabel="Voltar" onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={styles.btnVoltar}><Ionicons name="arrow-back" size={26} color={tema.textoLogo} /></TouchableOpacity></View>
+        <View style={styles.avatarContainer}><Text style={styles.avatarText}>{iniciais}</Text></View>
+        <Text style={[styles.nomeUsuario, { color: tema.textoLogo }]}>{nome}</Text>
+        <Text style={{ color: tema.textoLogo }}>{dadosPerfil ? nomesPerfis[dadosPerfil.role] : 'Perfil indisponível'}</Text>
+        <Text style={[styles.emailUsuario, { color: tema.textoLogo }]}>{usuario?.email || 'E-mail não informado'}</Text>
+      </View>
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: tema.textoPrincipal }]}>Sua conta</Text>
+        <View style={[styles.cardMenu, { padding: 16, backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+          <Text style={{ color: tema.textoSecundario }}>Os dados acima representam sua conta autenticada. Edição de cadastro e alteração de senha não estão disponíveis nesta versão.</Text>
         </View>
-
-        {cargoUsuario === 'Admin' ? (
-          <>
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: '#D32F2F' }]}>Infraestrutura e Permissões</Text>
-              <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: '#D32F2F' }]}>
-                <MenuOption icone="shield-checkmark" titulo="Controle de Acessos" subtitulo="Aprovar/bloquear usuários" corIcone="#D32F2F" onPress={() => handleAlertaDesenvolvimento('ACL e Usuários')} />
-                <MenuOption icone="list-circle" titulo="Logs de Auditoria" subtitulo="Rastrear exclusões e alterações" corIcone="#D32F2F" onPress={() => handleAlertaDesenvolvimento('Auditoria do Sistema')} />
-                <MenuOption icone="business" titulo="Dados da Instituição" subtitulo="Ano letivo, feriados e regras" corIcone="#D32F2F" onPress={() => handleAlertaDesenvolvimento('Configurações Globais')} />
-              </View>
-            </View>
-            
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: '#2E7D32' }]}>Banco de Dados</Text>
-              <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: '#2E7D32' }]}>
-                <MenuOption icone={sincronizando ? "sync" : "server"} titulo={sincronizando ? "Sincronizando..." : "[DEV] Sincronizar Turmas"} subtitulo={sincronizando ? "Aguarde..." : "Injetar carga inicial"} corIcone="#2E7D32" onPress={handleInjetarDados} desativado={sincronizando} />
-                <MenuOption icone="cloud-download" titulo="Backup do Sistema" subtitulo="Exportar base completa" corIcone="#2E7D32" onPress={() => handleAlertaDesenvolvimento('Backup')} />
-              </View>
-            </View>
-          </>
-        ) : (
-          <>
-            {cargoUsuario === 'Coordenador' && (
-              <View style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: '#E65100' }]}>Gestão Acadêmica</Text>
-                <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: '#E65100' }]}>
-                  <MenuOption icone="megaphone" titulo="Comunicados Oficiais" subtitulo="Mural de professores" corIcone="#E65100" onPress={() => setModalAviso(true)} />
-                  <MenuOption icone="lock-open" titulo="Gestão de Prazos" subtitulo="Bloquear diários de classe" corIcone="#E65100" onPress={() => handleAlertaDesenvolvimento('Prazos')} />
-                </View>
-              </View>
-            )}
-          </>
-        )}
-
-        {/* VISÍVEL PARA TODOS OS CARGOS */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: tema.textoSecundario }]}>Sua Conta</Text>
-          <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-            <MenuOption icone="person" titulo="Meus Dados" corIcone={tema.botaoPrimario} onPress={() => setModalDados(true)} />
-            <MenuOption icone="shield-checkmark" titulo="Segurança e Preferências" corIcone={tema.botaoPrimario} onPress={() => setModalPrivacidade(true)} />
-          </View>
+      </View>
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: tema.textoPrincipal }]}>{admin ? 'Gerenciar chamados' : 'Seus chamados de suporte'}</Text>
+        <Text style={{ color: tema.textoSecundario, marginBottom: 12 }}>Envio e resolução de chamados estarão disponíveis após a validação de segurança da etapa F2.</Text>
+        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+          <TouchableOpacity disabled accessibilityState={{ disabled: true }} style={[styles.menuItem, { opacity: 0.5, borderBottomColor: tema.borda }]}><Text style={{ color: tema.textoSecundario }}>Novo chamado indisponível</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => { void atualizar(); }} disabled={carregando} style={styles.menuItem}><Text style={{ color: tema.botaoPrimario }}>Atualizar</Text></TouchableOpacity>
         </View>
-
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: tema.textoSecundario }]}>Sistema Violeta</Text>
-          <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-            {cargoUsuario === 'Admin' ? (
-              <MenuOption icone="construct" titulo="Gerenciar Chamados" subtitulo="Resolver tickets da TI" corIcone="#D32F2F" onPress={() => { setChamadoSelecionado(null); setModalAdminChamados(true); }} />
-            ) : (
-              <MenuOption icone="help-buoy" titulo="Central de Suporte" subtitulo="Abrir chamado técnico" onPress={() => setModalAjuda(true)} />
-            )}
-            <MenuOption icone="information-circle" titulo="Sobre o Aplicativo" subtitulo="Créditos e Versão" onPress={() => setModalVersao(true)} />
-          </View>
-        </View>
-
-        <View style={[styles.section, { marginTop: 10, marginBottom: 40 }]}>
-          <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-            <MenuOption icone="log-out" titulo="Encerrar Sessão" danger={true} onPress={handleLogout} />
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* MODAL: MEUS DADOS */}
-      <Modal visible={modalDados} transparent={true} animationType="slide">
-        <View style={styles.modalOverlayFull}>
-          <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
-              <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Meus Dados</Text>
-              <TouchableOpacity onPress={() => setModalDados(false)} style={styles.btnFecharModal}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalBody}>
-              <View style={styles.avatarEdicaoContainer}>
-                <View style={styles.avatarEdicao}><Text style={styles.avatarText}>{usuario.iniciais}</Text></View>
-                <TouchableOpacity style={styles.btnAlterarFoto}><Ionicons name="camera" size={16} color="#FFF" /></TouchableOpacity>
-              </View>
-
-              <Text style={[styles.inputLabel, { color: tema.textoPrincipal }]}>Nome de Exibição:</Text>
-              <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal }]} value={formDados.nome} onChangeText={(t) => setFormDados({...formDados, nome: t})} />
-              
-              <Text style={[styles.inputLabel, { color: tema.textoPrincipal, marginTop: 15 }]}>E-mail de Cadastro (Bloqueado):</Text>
-              <TextInput style={[styles.input, styles.inputDisabled, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoSecundario }]} value={usuario.email} editable={false} />
-              
-              <Text style={[styles.inputLabel, { color: tema.textoPrincipal, marginTop: 15 }]}>Data de Nascimento:</Text>
-              <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal }]} value={formDados.dataNascimento} onChangeText={(t) => setFormDados({...formDados, dataNascimento: t})} />
-              
-              <Text style={[styles.inputLabel, { color: tema.textoPrincipal, marginTop: 15 }]}>Endereço Completo:</Text>
-              <TextInput style={[styles.inputAreaEnd, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal }]} value={formDados.endereco} multiline onChangeText={(t) => setFormDados({...formDados, endereco: t})} />
-              
-              <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: tema.botaoPrimario }]} onPress={handleSalvarDados}>
-                <Ionicons name="save-outline" size={20} color="#FFF" style={{ marginRight: 8 }} />
-                <Text style={styles.textoBtnLargo}>Salvar Alterações</Text>
-              </TouchableOpacity>
-              <View style={{ height: 40 }} />
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* MODAL: PRIVACIDADE E PREFERÊNCIAS */}
-      <Modal visible={modalPrivacidade} transparent={true} animationType="slide">
-        <View style={styles.modalOverlayFull}>
-          <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
-              <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Segurança e Preferências</Text>
-              <TouchableOpacity onPress={() => setModalPrivacidade(false)} style={styles.btnFecharModal}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalBody}>
-              <Text style={[styles.topicoSeguranca, { color: tema.botaoPrimario }]}>Alterar Senha</Text>
-              <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal }]} placeholder="Senha Atual" secureTextEntry placeholderTextColor={tema.textoSecundario} value={senhaAtual} onChangeText={setSenhaAtual} />
-              <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, marginTop: 10 }]} placeholder="Nova Senha" secureTextEntry placeholderTextColor={tema.textoSecundario} value={novaSenha} onChangeText={setNovaSenha} />
-              
-              <Text style={[styles.topicoSeguranca, { color: tema.botaoPrimario, marginTop: 30 }]}>Preferências Visuais</Text>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }}>
-                <TouchableOpacity style={[styles.btnPreferencia, { borderColor: tema.borda, backgroundColor: tamanhoFonte === 'Pequena' ? tema.botaoPrimario + '20' : tema.inputBackground }]} onPress={() => setTamanhoFonte('Pequena')}>
-                  <Text style={{ color: tema.textoPrincipal, fontSize: 12 }}>Fonte Pequena</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.btnPreferencia, { borderColor: tema.borda, backgroundColor: tamanhoFonte === 'Média' ? tema.botaoPrimario + '20' : tema.inputBackground }]} onPress={() => setTamanhoFonte('Média')}>
-                  <Text style={{ color: tema.textoPrincipal, fontSize: 14 }}>Fonte Média</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.btnPreferencia, { borderColor: tema.borda, backgroundColor: tamanhoFonte === 'Grande' ? tema.botaoPrimario + '20' : tema.inputBackground }]} onPress={() => setTamanhoFonte('Grande')}>
-                  <Text style={{ color: tema.textoPrincipal, fontSize: 16 }}>Fonte Grande</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={[styles.topicoSeguranca, { color: tema.botaoPrimario, marginTop: 30 }]}>Sessões Ativas</Text>
-              <View style={[styles.cardSessao, { borderColor: tema.borda, backgroundColor: tema.inputBackground }]}>
-                <Ionicons name="desktop-outline" size={24} color="#2E7D32" style={{ marginRight: 15 }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.tituloLinha, { color: tema.textoPrincipal }]}>Este Dispositivo</Text>
-                  <Text style={[styles.subtituloLinha, { color: tema.textoSecundario }]}>Salvador, BA • Ativo agora</Text>
-                </View>
-              </View>
-              
-              <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: tema.botaoPrimario, marginTop: 30 }]} onPress={handleSalvarPreferencias}>
-                <Ionicons name="save-outline" size={20} color="#FFF" style={{ marginRight: 8 }} />
-                <Text style={styles.textoBtnLargo}>Salvar Informações</Text>
-              </TouchableOpacity>
-              
-              <View style={{ height: 50 }} />
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* MODAL: ABRIR CHAMADO */}
-      <Modal visible={modalAjuda} transparent={true} animationType="slide">
-        <TouchableOpacity style={styles.modalOverlayHalf} activeOpacity={1} onPress={() => setModalAjuda(false)}>
-          <TouchableOpacity activeOpacity={1} style={[styles.modalContentHalf, { backgroundColor: tema.fundoBase }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
-              <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Abrir Chamado</Text>
-              <TouchableOpacity onPress={() => setModalAjuda(false)} style={styles.btnFecharModal}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
-            </View>
-            <View style={styles.modalBody}>
-              <TextInput style={[styles.inputArea, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal }]} placeholder="Descreva o problema..." placeholderTextColor={tema.textoSecundario} multiline value={textoChamado} onChangeText={setTextoChamado} />
-              <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: tema.botaoPrimario }]} onPress={handleEnviarChamado}><Text style={styles.textoBtnLargo}>Enviar Ticket</Text></TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* MODAL: AVISOS */}
-      <Modal visible={modalAviso} transparent={true} animationType="slide">
-        <TouchableOpacity style={styles.modalOverlayHalf} activeOpacity={1} onPress={() => setModalAviso(false)}>
-          <TouchableOpacity activeOpacity={1} style={[styles.modalContentHalf, { backgroundColor: tema.fundoBase }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
-              <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Novo Comunicado</Text>
-              <TouchableOpacity onPress={() => setModalAviso(false)} style={styles.btnFecharModal}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
-            </View>
-            <View style={styles.modalBody}>
-              <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal }]} value={tituloAviso} onChangeText={setTituloAviso} placeholder="Título" />
-              <TextInput style={[styles.inputArea, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, marginTop: 15 }]} multiline value={mensagemAviso} onChangeText={setMensagemAviso} placeholder="Mensagem" />
-              <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: '#E65100' }]} onPress={() => { if (Platform.OS === 'web') window.alert("Publicado!"); else Alert.alert("Sucesso", "Publicado!"); setModalAviso(false); }}><Text style={styles.textoBtnLargo}>Publicar Aviso</Text></TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* MODAL: ADMIN CHAMADOS */}
-      <Modal visible={modalAdminChamados} transparent={true} animationType="slide">
-        <View style={styles.modalOverlayFull}>
-          <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
-              {chamadoSelecionado ? (
-                <TouchableOpacity onPress={() => setChamadoSelecionado(null)} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Ionicons name="arrow-back" size={24} color={tema.textoPrincipal} />
-                  <Text style={[styles.modalTitle, { color: tema.textoPrincipal, marginLeft: 10 }]}>Voltar</Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Tickets da TI</Text>
-              )}
-              <TouchableOpacity onPress={() => setModalAdminChamados(false)} style={styles.btnFecharModal}>
-                <Ionicons name="close" size={24} color={tema.textoSecundario} />
-              </TouchableOpacity>
-            </View>
-
-            {chamadoSelecionado ? (
-              <View style={styles.modalBody}>
-                <Text style={{ color: tema.textoSecundario, marginBottom: 15 }}>Aberto em: {chamadoSelecionado.data} às {chamadoSelecionado.hora}</Text>
-                <Text style={[styles.inputLabel, { color: tema.textoPrincipal }]}>Solicitante:</Text>
-                <Text style={{ color: tema.textoSecundario, marginBottom: 15 }}>{chamadoSelecionado.solicitante}</Text>
-                <Text style={[styles.inputLabel, { color: tema.textoPrincipal }]}>Descrição do Problema:</Text>
-                <View style={{ borderWidth: 1, borderColor: tema.borda, borderRadius: 10, padding: 15, backgroundColor: tema.inputBackground }}>
-                  <Text style={{ color: tema.textoPrincipal }}>{chamadoSelecionado.descricao}</Text>
-                </View>
-                {chamadoSelecionado.status === 'pendente' && (
-                  <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: '#2E7D32', marginTop: 30 }]} onPress={() => resolverChamado(chamadoSelecionado.id)}>
-                    <Text style={styles.textoBtnLargo}>Marcar como Resolvido</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            ) : (
-              <FlatList
-                data={chamados}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={{ padding: 20 }}
-                renderItem={({ item }) => (
-                  <TouchableOpacity 
-                    style={{ borderWidth: 1, borderColor: tema.borda, borderRadius: 12, padding: 15, marginBottom: 12, backgroundColor: tema.inputBackground, opacity: item.status === 'resolvido' ? 0.6 : 1 }} 
-                    onPress={() => setChamadoSelecionado(item)}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                      <Ionicons name={item.status === 'resolvido' ? "checkmark-circle" : "warning"} size={20} color={item.status === 'resolvido' ? '#2E7D32' : '#E65100'} style={{ marginRight: 8 }} />
-                      <Text style={{ color: tema.textoPrincipal, fontSize: 16, fontWeight: 'bold' }}>{item.solicitante}</Text>
-                    </View>
-                    <Text style={{ color: tema.textoSecundario, fontSize: 12 }}>{item.data} às {item.hora}</Text>
-                  </TouchableOpacity>
-                )}
-                ListEmptyComponent={<Text style={{ textAlign: 'center', color: tema.textoSecundario, marginTop: 20 }}>Nenhum chamado aberto.</Text>}
-              />
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* MODAL: VERSÃO DO APLICATIVO */}
-      <Modal visible={modalVersao} transparent={true} animationType="fade">
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setModalVersao(false)}>
-          <View style={[styles.modalVersaoContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
-            
-            <Ionicons name="layers" size={65} color={tema.botaoPrimario} style={{ marginBottom: 15 }} />
-            
-            <Text style={[styles.versaoAppNome, { color: tema.textoPrincipal }]}>VIOLETA</Text>
-            <Text style={[styles.versaoTagline, { color: tema.textoSecundario }]}>Gestão Educacional</Text>
-            
-            <View style={[styles.versaoBadge, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-              <Text style={[styles.versaoAppNumero, { color: tema.textoPrincipal }]}>Build 1.0.0 (Beta)</Text>
-            </View>
-            
-            <View style={[styles.versaoLinha, { borderBottomColor: tema.borda }]} />
-            
-            <Text style={[styles.tituloCreditos, { color: tema.textoSecundario }]}>DESENVOLVIDO POR</Text>
-            <Text style={[styles.nomeCredito, { color: tema.textoPrincipal, fontWeight: '800' }]}>Larissa Alves</Text>
-            <Text style={[styles.nomeCredito, { color: tema.textoPrincipal, fontWeight: '800' }]}>Aryane</Text>
-            <Text style={[styles.nomeCredito, { color: tema.botaoPrimario, fontWeight: '900', marginTop: 4 }]}>LuffyBaiano</Text>
-            
-            <View style={{ marginTop: 25, alignItems: 'center' }}>
-              <Text style={[styles.versaoCreditosMenor, { color: tema.textoSecundario }]}>Salvador, BA - 2026</Text>
-              <Text style={[styles.versaoDireitos, { color: tema.textoSecundario }]}>© Todos os direitos reservados.</Text>
-            </View>
-            
-          </View>
-        </TouchableOpacity>
-      </Modal>
-    </KeyboardAvoidingView>
+        {carregando ? <ActivityIndicator /> : erro ? <Text accessibilityRole="alert" style={{ color: tema.textoPrincipal }}>{erro.mensagem}</Text>
+          : <>
+            {!!dados?.invalidos && <Text style={{ color: tema.textoSecundario }}>Alguns chamados possuem dados inválidos e não puderam ser exibidos.</Text>}
+            {!dados?.chamados.length && <Text style={{ color: tema.textoSecundario }}>Nenhum chamado encontrado.</Text>}
+            {dados?.chamados.map(chamado => <View key={chamado.id} style={[styles.cardMenu, { padding: 16, marginBottom: 12, backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+              <Text style={{ color: tema.textoPrincipal }}>{chamado.descricao}</Text>
+              <Text style={{ color: tema.textoSecundario }}>{chamado.status === 'pendente' ? 'Pendente' : 'Resolvido'}</Text>
+              <Text style={{ color: tema.textoSecundario }}>{chamado.criadoEmMs === null ? 'Data não informada' : new Date(chamado.criadoEmMs).toLocaleString('pt-BR', { timeZone: FUSO_ACADEMICO })}</Text>
+              {admin && <Text style={{ color: tema.textoSecundario }}>{chamado.solicitanteUid ? `Solicitante UID: ${chamado.solicitanteUid}` : 'Solicitante não identificado no registro legado'}</Text>}
+              {admin && chamado.status === 'pendente' && <TouchableOpacity disabled accessibilityState={{ disabled: true }} style={{ marginTop: 10, opacity: 0.5 }}><Text style={{ color: tema.textoSecundario }}>Resolução indisponível até a F2</Text></TouchableOpacity>}
+            </View>)}
+          </>}
+      </View>
+      <View style={styles.section}><Text style={[styles.sectionTitle, { color: tema.textoPrincipal }]}>Sistema Violeta</Text><Text style={{ color: tema.textoSecundario }}>Gestão educacional. Funções administrativas de provisionamento não são disponibilizadas pelo aplicativo.</Text></View>
+      <View style={[styles.section, { marginBottom: 40 }]}>
+        {erroLogout && <Text accessibilityRole="alert" style={{ color: tema.textoPrincipal }}>{erroLogout}</Text>}
+        <TouchableOpacity style={styles.menuItem} disabled={saindo} onPress={confirmarSaida}><Text style={{ color: '#C62828' }}>{saindo ? 'Encerrando sessão...' : 'Encerrar sessão'}</Text></TouchableOpacity>
+      </View>
+    </ScrollView>
   );
 }
 
@@ -476,7 +84,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { alignItems: 'center', paddingTop: 50, paddingBottom: 30, borderBottomLeftRadius: 30, borderBottomRightRadius: 30, elevation: 5 },
   headerTopRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 10 },
-  btnVoltar: { padding: 5 }, btnToggleCargo: { padding: 5, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 8 },
+  btnVoltar: { padding: 5 },
   avatarContainer: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
   avatarText: { fontSize: 32, fontWeight: 'bold', color: '#1565C0' },
   nomeUsuario: { fontSize: 22, fontWeight: 'bold', marginBottom: 5 },

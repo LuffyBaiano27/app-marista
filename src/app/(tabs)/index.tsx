@@ -4,25 +4,23 @@ import { Ionicons } from '@expo/vector-icons';
 import { cores } from '../../constants/colors';
 import { useRouter } from 'expo-router';
 
-// FIREBASE
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../../config/firebase'; 
-
-const USUARIO_LOGADO = { id: 'prof_1', nome: 'Luffy Baiano', cargo: 'Admin' };
+import { useAuth } from '../../contexts/authContext';
+import { useGradeTurmas } from '../../hooks/use-grade-turmas';
+import { pendenciasDoDia } from '../../utils/calendario';
+import { nomesPerfis } from '../../types/usuario';
 
 export default function DashboardScreen() {
   const router = useRouter();
   const isDarkMode = useColorScheme() === 'dark';
   const tema = isDarkMode ? cores.dark : cores.light;
 
-  const [saudacaoTempo, setSaudacaoTempo] = useState('Olá');
+
   const [fraseMotivacional, setFraseMotivacional] = useState('');
   
-  // ESTADOS FIREBASE
-  const [todasTurmas, setTodasTurmas] = useState<any[]>([]); 
-  const [chamadasRealizadasHoje, setChamadasRealizadasHoje] = useState<string[]>([]);
-  const [carregando, setCarregando] = useState(false);
-  
+  const { dadosPerfil } = useAuth();
+  const { turmas: todasTurmas, chamadasHoje, turmasInvalidas, carregando, erro, erroIndicadores, calendario, atualizar: buscarDadosDoFirebase } = useGradeTurmas();
+  const chamadasRealizadasHoje = Object.keys(chamadasHoje);
+
   const [modalNotificacoes, setModalNotificacoes] = useState(false);
   const [notificacoes, setNotificacoes] = useState([
     { id: '1', titulo: 'Alteração Aprovada', mensagem: 'O coordenador aprovou sua solicitação de nota para a aluna Ana Carolina.', lida: false, tempo: 'Agora', tipo: 'sucesso' },
@@ -36,60 +34,15 @@ export default function DashboardScreen() {
     "Educação não transforma o mundo. Educação muda as pessoas. - Paulo Freire",
   ];
 
-  const getDataDeHoje = () => new Date().toISOString().split('T')[0];
-
-  const buscarDadosDoFirebase = async () => {
-    setCarregando(true);
-    try {
-      // 1. Busca Turmas
-      const turmasRef = collection(db, 'turmas');
-      let qTurmas;
-      if (USUARIO_LOGADO.cargo === 'Admin' || USUARIO_LOGADO.cargo === 'Coordenador') {
-        qTurmas = query(turmasRef);
-      } else {
-        qTurmas = query(turmasRef, where('professorId', '==', USUARIO_LOGADO.id)); 
-      }
-      
-      const turmasSnap = await getDocs(qTurmas);
-      const turmasBanco: any[] = [];
-      turmasSnap.forEach((doc) => turmasBanco.push({ id: doc.id, ...doc.data() }));
-      setTodasTurmas(turmasBanco);
-
-      // 2. Busca Chamadas Realizadas HOJE
-      const chamadasRef = collection(db, 'chamadas');
-      const qChamadas = query(chamadasRef, where('dataChamadaFormatada', '==', getDataDeHoje()));
-      const chamadasSnap = await getDocs(qChamadas);
-      
-      const chamadasHojeIds: string[] = [];
-      chamadasSnap.forEach((doc) => {
-        chamadasHojeIds.push(doc.data().turmaId);
-      });
-      setChamadasRealizadasHoje(chamadasHojeIds);
-
-    } catch (error) {
-      console.error("Erro ao buscar dados no Firebase:", error);
-    } finally {
-      setCarregando(false);
-    }
-  };
-
   useEffect(() => {
-    const hora = new Date().getHours();
-    if (hora >= 5 && hora < 12) setSaudacaoTempo('Bom dia');
-    else if (hora >= 12 && hora < 18) setSaudacaoTempo('Boa tarde');
-    else setSaudacaoTempo('Boa noite');
     setFraseMotivacional(frases[Math.floor(Math.random() * frases.length)]);
-    buscarDadosDoFirebase();
   }, []);
 
-  // LÓGICA: Dia Atual
-  const diaAtual = new Date().getDay(); 
-  const diaBusca = (diaAtual === 0 || diaAtual === 6) ? 1 : diaAtual; 
-  
-  // LÓGICA "PARA HOJE": Pega as turmas do dia e REMOVE as que já tiveram chamada
-  const turmasDeHojePendentes = todasTurmas
-    .filter(t => t.diaId === diaBusca && !chamadasRealizadasHoje.includes(t.id))
-    .sort((a,b) => a.horario.localeCompare(b.horario));
+  const diaAtual = calendario.diaSemana;
+  const saudacaoTempo = calendario.hora >= 5 && calendario.hora < 12 ? 'Bom dia'
+    : calendario.hora >= 12 && calendario.hora < 18 ? 'Boa tarde' : 'Boa noite';
+  const turmasDeHojePendentes = pendenciasDoDia(todasTurmas, chamadasHoje, diaAtual);
+  const temAulaHoje = todasTurmas.some(t => t.diaId === diaAtual);
 
   const diasDaSemana = [
     { id: 1, nome: 'Segunda' }, { id: 2, nome: 'Terça' }, 
@@ -130,7 +83,7 @@ export default function DashboardScreen() {
         <View style={styles.header}>
           <View style={styles.headerTextContainer}>
             <Text style={[styles.tituloSaudacao, { color: tema.textoPrincipal }]}>
-              {saudacaoTempo}, {USUARIO_LOGADO.cargo} {USUARIO_LOGADO.nome.split(' ')[0]}! 👋
+              {saudacaoTempo}, {dadosPerfil ? nomesPerfis[dadosPerfil.role] : ''} {dadosPerfil?.nome.split(/\s+/)[0]}! 👋
             </Text>
             <Text style={[styles.subtituloSaudacao, { color: tema.textoSecundario }]}>Que seja uma ótima aula!</Text>
           </View>
@@ -155,16 +108,24 @@ export default function DashboardScreen() {
           <Text style={[styles.sectionTitle, { color: tema.textoPrincipal }]}>Meu Cronograma</Text>
         </View>
         
-        {carregando && todasTurmas.length === 0 ? (
+        {turmasInvalidas > 0 && <Text style={{ color: tema.textoSecundario }}>Algumas turmas possuem dados inválidos e não puderam ser exibidas.</Text>}
+        {erro ? (
+          <View style={{ paddingVertical: 20 }}>
+            <Text accessibilityRole="alert" style={{ color: tema.textoPrincipal }}>{erro.mensagem}</Text>
+            <TouchableOpacity onPress={() => { void buscarDadosDoFirebase(); }}><Text style={{ color: tema.botaoPrimario }}>Tentar novamente</Text></TouchableOpacity>
+          </View>
+        ) : carregando ? (
            <View style={{ marginVertical: 40, alignItems: 'center' }}>
              <ActivityIndicator size="large" color={tema.botaoPrimario} />
              <Text style={{ marginTop: 10, color: tema.textoSecundario }}>Montando grelha...</Text>
            </View>
+        ) : todasTurmas.length === 0 ? (
+          <Text style={{ color: tema.textoSecundario }}>Nenhuma turma vinculada disponível.</Text>
         ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scrollMatrizContainer}>
             {diasDaSemana.map((dia) => {
               const aulasDoDia = todasTurmas.filter(t => t.diaId === dia.id).sort((a,b) => a.horario.localeCompare(b.horario));
-              const isHoje = dia.id === diaBusca;
+              const isHoje = dia.id === diaAtual;
               
               return (
                 <View key={dia.id} style={[styles.colunaDia, { borderColor: isHoje ? tema.botaoPrimario : tema.borda, backgroundColor: isHoje ? tema.botaoPrimario + '08' : tema.inputBackground }]}>
@@ -178,7 +139,7 @@ export default function DashboardScreen() {
                       aulasDoDia.map(aula => {
                         const cor = obterCorMateria(aula.disciplina);
                         // Se a chamada já foi feita, mostramos um iconezinho de check na grade
-                        const aulaConcluida = chamadasRealizadasHoje.includes(aula.id);
+                        const aulaConcluida = dia.id === diaAtual && chamadasRealizadasHoje.includes(aula.id);
                         return (
                           <View key={aula.id} style={[styles.blocoAula, { backgroundColor: cor.bg }]}>
                             <Text style={[styles.blocoMateria, { color: cor.text }]} numberOfLines={1}>
@@ -187,7 +148,7 @@ export default function DashboardScreen() {
                             <Text style={[styles.blocoTurma, { color: cor.text }]}>{aula.nome}</Text>
                             <View style={styles.blocoRodape}>
                               <Text style={[styles.blocoHorario, { color: cor.text }]}>{aula.horario.split(' ')[0]}</Text>
-                              {USUARIO_LOGADO.cargo !== 'Professor' && aula.professorNome && (
+                              {dadosPerfil?.role !== 'professor' && aula.professorNome && (
                                 <Text style={[styles.blocoProf, { color: cor.text }]} numberOfLines={1}>{aula.professorNome.split(' ')[0]}</Text>
                               )}
                             </View>
@@ -209,21 +170,22 @@ export default function DashboardScreen() {
           </TouchableOpacity>
         </View>
 
-        {carregando ? (
+        <Text style={{ color: tema.textoSecundario, marginBottom: 12 }}>Criação e assinatura indisponíveis. Indicadores consideram apenas diários com data confiável.</Text>
+        {erro ? null : erroIndicadores ? (
+          <View><Text accessibilityRole="alert" style={{ color: tema.textoPrincipal }}>{erroIndicadores.mensagem}</Text><TouchableOpacity onPress={() => { void buscarDadosDoFirebase(); }}><Text style={{ color: tema.botaoPrimario }}>Tentar novamente</Text></TouchableOpacity></View>
+        ) : carregando ? (
            <Text style={{ textAlign: 'center', marginTop: 20, color: tema.textoSecundario }}>Procurando turmas...</Text>
-        ) : turmasDeHojePendentes.length === 0 ? (
+        ) : todasTurmas.length === 0 ? null : turmasDeHojePendentes.length === 0 ? (
            <View style={{alignItems: 'center', marginTop: 20}}>
              <Ionicons name="checkmark-circle-outline" size={40} color="#2E7D32" />
-             <Text style={{ textAlign: 'center', marginTop: 10, color: '#2E7D32', fontWeight: 'bold' }}>Tudo pronto!</Text>
-             <Text style={{ textAlign: 'center', color: tema.textoSecundario }}>Você não tem chamadas pendentes hoje.</Text>
+             <Text style={{ textAlign: 'center', marginTop: 10, color: '#2E7D32', fontWeight: 'bold' }}>{temAulaHoje ? 'Nenhuma pendência identificada' : 'Nenhuma aula prevista para hoje'}</Text>
+             <Text style={{ textAlign: 'center', color: tema.textoSecundario }}>A grade semanal permanece disponível acima.</Text>
            </View>
         ) : (
           turmasDeHojePendentes.map((turma) => (
-            <TouchableOpacity 
+            <View
               key={turma.id} 
               style={[styles.cardTurma, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}
-              activeOpacity={0.7}
-              onPress={() => router.push(`/chamada?id=${turma.id}`)}
             >
               <View style={[styles.iconeTurmaBg, { backgroundColor: tema.botaoPrimario + '20' }]}><Ionicons name="people" size={24} color={tema.botaoPrimario} /></View>
               <View style={styles.infoTurma}>
@@ -236,8 +198,8 @@ export default function DashboardScreen() {
                   <Text style={[styles.textoHorarioDestaque, { color: tema.botaoPrimario }]}>{turma.horario} • {turma.turno}</Text>
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={tema.icone} />
-            </TouchableOpacity>
+              <Ionicons name="lock-closed" size={20} color={tema.icone} />
+            </View>
           ))
         )}
       </ScrollView>

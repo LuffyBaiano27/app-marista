@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "chamadas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "turmaId", "order": "ASCENDING" },
+        { "fieldPath": "dataChamada", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

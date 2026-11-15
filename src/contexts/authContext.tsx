@@ -1,53 +1,88 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { auth, db } from '../config/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { auth } from '../config/firebase';
+import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
+import { observarPerfilUsuario } from '../services/perfilUsuario';
+import type { DadosPerfil, StatusPerfil } from '../types/usuario';
 
-// Tipagem do nosso Crachá Global
 interface AuthContextData {
-  usuario: User | null;      // Dados básicos de login (email, uid)
-  dadosPerfil: any | null;   // Dados do Banco (nome, role/cargo, etc)
+  usuario: User | null;
+  dadosPerfil: DadosPerfil | null;
   carregando: boolean;
+  statusPerfil: StatusPerfil;
+  erro: string | null;
+  encerrarSessao: () => Promise<void>;
 }
 
-// Criando o "Tubo" que vai espalhar essa informação pelo app
-const AuthContext = createContext<AuthContextData>({} as AuthContextData);
+type EstadoAuth = Omit<AuthContextData, 'carregando' | 'encerrarSessao'>;
+const AuthContext = createContext<AuthContextData | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [usuario, setUsuario] = useState<User | null>(null);
-  const [dadosPerfil, setDadosPerfil] = useState<any | null>(null);
-  const [carregando, setCarregando] = useState(true);
+  const [estado, setEstado] = useState<EstadoAuth>({
+    usuario: null, dadosPerfil: null, statusPerfil: 'carregando', erro: null,
+  });
 
   useEffect(() => {
-    // O Firebase fica "escutando" 24h por dia se alguém fez login ou logout
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        setUsuario(firebaseUser);
-        
-        // Se logou, vamos no Firestore buscar quem é ele (Nome, se é Admin/Professor)
-        const docRef = doc(db, 'usuarios', firebaseUser.uid);
-        const docSnap = await getDoc(docRef);
-        
-        if (docSnap.exists()) {
-          setDadosPerfil(docSnap.data());
-        }
-      } else {
-        // Se deslogou, limpamos a memória
-        setUsuario(null);
-        setDadosPerfil(null);
+    let ativo = true;
+    let versaoSessao = 0;
+    let cancelarPerfil: (() => void) | undefined;
+    const unsubscribe = onAuthStateChanged(auth, (usuario) => {
+      const versaoAtual = ++versaoSessao;
+      cancelarPerfil?.();
+      cancelarPerfil = undefined;
+      if (!ativo) return;
+      setEstado({
+        usuario, dadosPerfil: null,
+        statusPerfil: usuario ? 'carregando' : 'desconectado', erro: null,
+      });
+      if (!usuario) return;
+
+      // Ignora respostas de uma sessão anterior ou de um provider desmontado.
+      const sessaoAtual = () => ativo && versaoAtual === versaoSessao
+        && auth.currentUser?.uid === usuario.uid;
+      const falharPerfil = () => {
+        if (!sessaoAtual()) return;
+        setEstado({ usuario, dadosPerfil: null, statusPerfil: 'erro',
+          erro: 'Não foi possível verificar seu perfil no servidor. Recarregue a aplicação para tentar novamente.' });
+      };
+      try {
+        cancelarPerfil = observarPerfilUsuario(usuario.uid, resultado => {
+          if (!sessaoAtual()) return;
+          setEstado({ usuario, dadosPerfil: resultado.dadosPerfil,
+            statusPerfil: resultado.status, erro: null });
+        }, falharPerfil);
+      } catch {
+        falharPerfil();
       }
-      setCarregando(false);
+    }, () => {
+      ++versaoSessao;
+      cancelarPerfil?.();
+      cancelarPerfil = undefined;
+      if (ativo) setEstado({ usuario: null, dadosPerfil: null, statusPerfil: 'erro',
+        erro: 'Não foi possível verificar sua sessão.' });
     });
 
-    return unsubscribe; // Limpa o ouvinte quando o app fecha
+    return () => {
+      ativo = false;
+      ++versaoSessao;
+      cancelarPerfil?.();
+      unsubscribe();
+    };
   }, []);
 
+  const encerrarSessao = async () => {
+    await signOut(auth);
+    // O observador é a fonte única do estado da sessão e limpa o perfil.
+  };
+
   return (
-    <AuthContext.Provider value={{ usuario, dadosPerfil, carregando }}>
+    <AuthContext.Provider value={{ ...estado, carregando: estado.statusPerfil === 'carregando', encerrarSessao }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-// Uma ferramenta rápida para puxarmos esses dados em qualquer tela
-export const useAuth = () => useContext(AuthContext);
+export function useAuth() {
+  const contexto = useContext(AuthContext);
+  if (!contexto) throw new Error('useAuth deve ser utilizado dentro de AuthProvider.');
+  return contexto;
+}
