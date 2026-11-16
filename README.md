@@ -1,50 +1,153 @@
 # Sistema Violeta
 
-MVP acadêmico de gestão educacional para uma instituição, desenvolvido com React Native, Expo Router, TypeScript, Firebase Authentication e Cloud Firestore.
+Sistema de gestão educacional desenvolvido como projeto acadêmico, com foco na organização de turmas, acompanhamento de atividades escolares e controle de acesso por perfil de usuário.
 
-## Estado atual
+A aplicação utiliza **React Native, Expo Router, TypeScript e Firebase**, com suporte à autenticação, persistência de dados e autorização baseada em perfis.
 
-- Login/logout reais, restauração de sessão, identidade em usuarios/{uid} e proteção de rotas.
-- Acesso operacional exige perfil válido e ativo. Professor consulta turmas por professorId; coordenador por coordenadorIds; administrador ativo tem o escopo institucional documentado.
-- Início/Turmas usam dados autorizados, grade semanal e calendário America/Bahia.
-- Histórico e diários existentes são somente leitura, limitados às turmas autorizadas.
-- Suporte tem leitura por UID e serviços de criação/resolução testados; suas ações permanecem desabilitadas na interface.
-- Regras de autorização locais foram validadas no emulador. Isso não comprova que estejam publicadas: publicação depende de autorização e verificação próprias.
+**Status:** MVP em desenvolvimento | Homologação em andamento
 
-Criação/assinatura de chamadas, avaliações, notas, recuperação de senha e demais fluxos incompletos não estão disponíveis. O modal de notificações do Início ainda contém uma demonstração local sem persistência; não representa eventos reais. Consulte o [relatório de estabilização](docs/arquitetura/estabilizacao-etapa-g.md).
+## Tecnologias
+
+- **React Native + Expo SDK 58** — Desenvolvimento da aplicação.
+- **Expo Router** — Navegação e gerenciamento de rotas.
+- **TypeScript** — Tipagem estática.
+- **Firebase Authentication** — Autenticação e gerenciamento de sessões.
+- **Cloud Firestore** — Persistência de dados.
+- **Firebase Security Rules** — Controle de acesso aos documentos.
+
+## Funcionalidades
+
+O MVP contempla:
+
+- Autenticação e proteção de rotas.
+- Identificação de usuários por perfil e status de ativação.
+- Consulta de turmas conforme permissões.
+- Grade semanal e calendário acadêmico.
+- Consulta ao histórico de chamadas.
+- Estrutura de atendimento e acompanhamento de suporte.
+
+### Perfis de acesso
+
+| Perfil            | Escopo                                                              |
+| ----------------- | ------------------------------------------------------------------- |
+| **Administrador** | Acesso institucional e funcionalidades administrativas autorizadas. |
+| **Coordenador**   | Consulta às turmas vinculadas ao seu usuário.                       |
+| **Professor**     | Consulta às turmas sob sua responsabilidade.                        |
+
+A personalização completa das interfaces por perfil está prevista nas próximas etapas.
+
+> **Limitações atuais:** criação e assinatura de chamadas, avaliações, notas, recuperação de senha e ações de suporte na interface ainda não estão disponíveis. As notificações utilizam dados demonstrativos.
 
 ## Executar localmente
 
-Com Node e as dependências do projeto já disponíveis:
+### Pré-requisitos
 
-```sh
-npm start
+- Node.js e npm.
+- Git.
+- Acesso ao repositório privado.
+
+### Instalação
+
+Clone o repositório e acesse o diretório do projeto:
+
+```bash
+git clone https://github.com/LuffyBaiano27/app-marista.git
+cd app-marista
 ```
 
-O manifesto atual utiliza Expo 58. Não atualizar dependências ou regenerar o lockfile incidentalmente. Para um ambiente novo, a instalação deve seguir a revisão do package-lock.json e o procedimento aprovado pela equipe.
+Instale as dependências utilizando o lockfile versionado:
 
-A configuração atual do cliente Firebase está em src/config/firebase.js; não há leitura de variáveis .env implementada. Ela aponta para o projeto compartilhado: não executar scripts de carga, migração ou testes de escrita nesse projeto. Identificadores públicos do cliente não substituem regras de segurança. Nunca incluir chaves privadas, contas de serviço, senhas ou credenciais de ferramentas no repositório.
+```bash
+npm ci
+```
 
-## Verificações
+Configure o ambiente:
 
-```sh
-./node_modules/.bin/tsc --noEmit
+```bash
+test -e .env.local || cp .env.example .env.local
+```
+
+Inicie a aplicação no navegador:
+
+```bash
+npx expo start --web
+```
+
+A aplicação estará disponível, normalmente, em `http://localhost:8081`.
+
+**Configuração:** o `.env.example` contém os valores públicos oficiais do Firebase `marista-app`. Não é necessário preencher variáveis manualmente.
+
+O arquivo `.env.local` é ignorado pelo Git. O comando acima preserva um arquivo local já existente. Não colocar senhas de usuários ou credenciais administrativas nesses arquivos.
+
+## Ambiente e segurança
+
+O projeto utiliza o Firebase compartilhado `marista-app`, com configuração de homologação.
+
+A inicialização valida as variáveis de ambiente e bloqueia configurações incompatíveis com o projeto autorizado.
+
+**Atenção:** o modo de homologação não isola dados ou usuários. Todos os integrantes utilizam o mesmo projeto Firebase.
+
+As regras restritivas foram publicadas manualmente em marista-app, banco (default), conforme confirmação do responsável. Os três perfis ativos e o bloqueio do administrador inativo foram homologados manualmente. A cobertura automatizada e os limites dessa validação estão no relatório da Etapa I.
+
+Não versionar senhas, chaves privadas, contas de serviço ou tokens administrativos.
+
+## Testes
+
+Verificação de tipos:
+
+```bash
+npx tsc --noEmit
+```
+
+Testes de configuração do Firebase:
+
+```bash
+node --test --test-isolation=none tests/configuracao/firebase.test.cjs
+```
+
+Verificação de alterações:
+
+```bash
 git diff --check
 ```
 
-Os comandos dos testes locais estão em [tests/seguranca-f1/README.md](tests/seguranca-f1/README.md). A suíte do emulador e os requisitos das ferramentas isoladas estão em [tests/seguranca-f2/README.md](tests/seguranca-f2/README.md). Não exigem login no Firebase: usam apenas projeto demo e dados sintéticos. Não executar testes paralelos contra o mesmo banco de emulador.
+As instruções dos testes de segurança estão disponíveis em:
 
-## Arquitetura e segurança
+- [Testes de segurança — F1](tests/seguranca-f1/README.md)
+- [Testes com Firebase Emulator — F2](tests/seguranca-f2/README.md)
 
-- [Contratos de dados](docs/arquitetura/contratos-dados.md)
-- [Matriz de permissões e provisionamento](docs/arquitetura/permissoes-seguranca.md)
-- [Regras efetivas, testes, publicação e reversão](docs/arquitetura/seguranca-etapa-f2.md)
-- [Relatório final de estabilização e pendências](docs/arquitetura/estabilizacao-etapa-g.md)
+## Documentação
 
-Os documentos A–F registram a evolução. Para o estado atual, prevalecem F2/G: chamadas sem gravações, até quatro coordenadores por turma e observação do perfil em tempo real desde F1. Não publicar regras junto com alterações do aplicativo sem revisão do projeto, dos dados legados e da versão cliente.
+| Documento                                                                                  | Descrição                                 |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| [Contratos de dados](docs/arquitetura/contratos-dados.md)                                  | Estrutura e validação dos dados.          |
+| [Permissões e segurança](docs/arquitetura/permissoes-seguranca.md)                         | Perfis e regras de autorização.           |
+| [Segurança — F2](docs/arquitetura/seguranca-etapa-f2.md)                                   | Testes, publicação e reversão das regras. |
+| [Estabilização — G](docs/arquitetura/estabilizacao-etapa-g.md)                             | Funcionalidades e limitações atuais.      |
+| [Homologação — I1 (histórico)](docs/arquitetura/homologacao-etapa-i1.md)                               | Planejamento da homologação.              |
+| [Configuração e organização — I4 (histórico)](docs/arquitetura/configuracao-e-organizacao-etapa-i4.md) | Configuração e inventário do Firebase.    |
+
+O estado atual e as pendências estão no [relatório de retomada da Etapa I](docs/arquitetura/retomada-etapa-i.md).
+
+## Desenvolvimento
+
+O projeto está em fase de homologação, com foco nas seguintes atividades:
+
+1. Conclusão da configuração e organização do Firebase.
+2. Validação das permissões dos perfis.
+3. Adequação das interfaces de Administrador, Coordenador e Professor.
+4. Testes integrados e estabilização.
 
 ## Equipe
 
-LuffyBaiano (infraestrutura, banco de dados e React Native), Larissa Alves e Aryane.
+- **LuffyBaiano**&#x20;
+- **Larissa Alves**
+- **Aryane Andrade&#x20;**
 
-© 2026 Sistema Violeta. Salvador, BA. Consulte LICENSE.
+## Licença
+
+Consulte o arquivo [LICENSE](LICENSE).
+
+---
+
+© 2026 Sistema Violeta.
