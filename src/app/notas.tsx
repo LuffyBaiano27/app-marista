@@ -5,16 +5,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { cores } from '../constants/colors';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useDemoProfile } from '../contexts/demoProfileContext';
 
 export default function NotasScreen() {
   const router = useRouter();
   const params = useLocalSearchParams(); 
+  const { perfil } = useDemoProfile();
   
   const isDarkMode = useColorScheme() === 'dark';
   const tema = isDarkMode ? cores.dark : cores.light;
 
-  const [tipoUsuario, setTipoUsuario] = useState<'professor' | 'coordenador'>((params.visao as any) || 'professor');
   const [periodoAberto, setPeriodoAberto] = useState(params.status === 'aberto');
+  const nomePerfil = perfil === 'admin' ? 'Administrador' : perfil === 'coordenador' ? 'Coordenador' : 'Professor';
 
   const valorMaximoProva = 8.0;
 
@@ -53,12 +55,12 @@ export default function NotasScreen() {
           <View style={styles.alunoInfo}>
             <Text style={[styles.nomeAluno, { color: tema.textoPrincipal }]}>{item.nome}</Text>
             {isAguardando && <Text style={styles.textoAlerta}>⚠️ Solicitação em análise</Text>}
-            {isRecusado && tipoUsuario === 'professor' && <Text style={[styles.textoAlerta, { color: '#C62828' }]}>❌ Solicitação recusada</Text>}
+            {isRecusado && perfil === 'professor' && <Text style={[styles.textoAlerta, { color: '#C62828' }]}>❌ Solicitação recusada</Text>}
           </View>
           
           <View style={styles.notaArea}>
             {/* REGRA VISUAL SÊNIOR: Se for Professor e tiver no prazo, mostra CAIXA DE INPUT. */}
-            {periodoAberto && tipoUsuario === 'professor' ? (
+            {periodoAberto && perfil === 'professor' ? (
               <View style={[styles.inputNotaContainer, { borderColor: tema.borda, backgroundColor: tema.fundoBase }]}>
                 <TextInput
                   style={[styles.inputNota, { color: tema.textoPrincipal }]}
@@ -76,12 +78,12 @@ export default function NotasScreen() {
                   {item.nota} <Text style={[styles.textoMaximo, { color: tema.textoSecundario }]}>/ {valorMaximoProva.toFixed(1)}</Text>
                 </Text>
                 
-                {!periodoAberto && tipoUsuario === 'professor' && !isAguardando && (
+                {!periodoAberto && perfil === 'professor' && !isAguardando && (
                   <TouchableOpacity style={styles.btnIcone} onPress={() => { setCardExpandido(isExpandido ? null : item.id); setTextoJustificativa(''); }}>
                     <Ionicons name="pencil" size={16} color={tema.textoSecundario} />
                   </TouchableOpacity>
                 )}
-                {tipoUsuario === 'coordenador' && isAguardando && (
+                {perfil === 'coordenador' && isAguardando && (
                   <TouchableOpacity style={styles.btnIcone} onPress={() => setCardExpandido(isExpandido ? null : item.id)}>
                     <Ionicons name="eye" size={18} color="#E65100" />
                   </TouchableOpacity>
@@ -93,7 +95,7 @@ export default function NotasScreen() {
 
         {isExpandido && (
           <View style={[styles.areaExpandida, { borderTopColor: tema.borda }]}>
-            {tipoUsuario === 'professor' && !isAguardando && (
+            {perfil === 'professor' && !isAguardando && (
               <View>
                 <Text style={[styles.labelMotivo, { color: tema.textoPrincipal }]}>Motivo da alteração de nota:</Text>
                 <TextInput
@@ -110,14 +112,14 @@ export default function NotasScreen() {
               </View>
             )}
 
-            {tipoUsuario === 'professor' && isRecusado && (
+            {perfil === 'professor' && isRecusado && (
               <View style={[styles.boxLeitura, { backgroundColor: '#FFEBEE', borderColor: '#FFCDD2' }]}>
                 <Text style={[styles.labelMotivo, { color: '#C62828' }]}>Retificação Recusada:</Text>
                 <Text style={[styles.textoLeitura, { color: '#C62828' }]}>{item.justificativaCoord}</Text>
               </View>
             )}
 
-            {tipoUsuario === 'coordenador' && isAguardando && (
+            {perfil === 'coordenador' && isAguardando && (
               <View>
                 <View style={[styles.boxLeitura, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
                   <Text style={[styles.labelMotivo, { color: tema.textoPrincipal }]}>Justificativa do Professor:</Text>
@@ -165,9 +167,7 @@ export default function NotasScreen() {
       
       <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
         <View style={styles.barraTestes}>
-          <TouchableOpacity onPress={() => setTipoUsuario(tipoUsuario === 'professor' ? 'coordenador' : 'professor')}>
-            <Text style={styles.textoTeste}>Visão: {tipoUsuario.toUpperCase()}</Text>
-          </TouchableOpacity>
+          <Text style={styles.textoTeste}>Perfil: {nomePerfil}</Text>
           <TouchableOpacity onPress={() => setPeriodoAberto(!periodoAberto)}>
             <Text style={styles.textoTeste}>Prazo: {periodoAberto ? 'ABERTO' : 'FECHADO'}</Text>
           </TouchableOpacity>
@@ -192,7 +192,7 @@ export default function NotasScreen() {
             <Text style={styles.textoAvisoPrazo}>{periodoAberto ? "Aberto" : "Encerrado"}</Text>
           </View>
 
-          {tipoUsuario === 'coordenador' && (
+          {perfil === 'coordenador' && (
             <TouchableOpacity 
               style={styles.btnEncerrarCoord} 
               onPress={() => setPeriodoAberto(!periodoAberto)}

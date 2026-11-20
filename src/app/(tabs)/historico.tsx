@@ -3,15 +3,18 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, useColorScheme, Tex
 import { Ionicons } from '@expo/vector-icons';
 import { cores } from '../../constants/colors';
 import { useRouter } from 'expo-router';
+import { useDemoProfile } from '../../contexts/demoProfileContext';
 
 // FIREBASE
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from '../../config/firebase'; 
 
 const USUARIO_LOGADO = { id: 'prof_1', nome: 'Luffy Baiano', cargo: 'Admin' };
+const ID_PROFESSOR_DEMONSTRATIVO = 'prof_1';
 
 export default function HistoricoScreen() {
   const router = useRouter();
+  const { perfil } = useDemoProfile();
   const isDarkMode = useColorScheme() === 'dark';
   const tema = isDarkMode ? cores.dark : cores.light;
 
@@ -19,6 +22,7 @@ export default function HistoricoScreen() {
   const [busca, setBusca] = useState('');
   
   const [historicoChamadas, setHistoricoChamadas] = useState<any[]>([]);
+  const [turmasProfessorDemo, setTurmasProfessorDemo] = useState<{ ids: string[]; nomes: string[] }>({ ids: [], nomes: [] });
   const [carregando, setCarregando] = useState(true);
 
   // ESTADO PARA CONTROLAR AS PASTAS ABERTAS (Acordeão)
@@ -53,7 +57,17 @@ export default function HistoricoScreen() {
     try {
       const turmasSnap = await getDocs(collection(db, 'turmas'));
       const dicTurmas: any = {};
-      turmasSnap.forEach(doc => { dicTurmas[doc.id] = doc.data().nome; });
+      const turmasAtribuidas: { ids: string[]; nomes: string[] } = { ids: [], nomes: [] };
+      turmasSnap.forEach(doc => {
+        const turma = doc.data();
+        dicTurmas[doc.id] = turma.nome;
+
+        if (turma.professorId === ID_PROFESSOR_DEMONSTRATIVO) {
+          turmasAtribuidas.ids.push(doc.id);
+          if (typeof turma.nome === 'string') turmasAtribuidas.nomes.push(turma.nome);
+        }
+      });
+      setTurmasProfessorDemo(turmasAtribuidas);
 
       const chamadasRef = collection(db, 'chamadas');
       const q = query(chamadasRef, orderBy('dataChamada', 'desc'));
@@ -94,19 +108,36 @@ export default function HistoricoScreen() {
   // ==========================================
   // LÓGICA DE FILTRAGEM E AGRUPAMENTO
   // ==========================================
-  const chamadasFiltradas = historicoChamadas.filter(item => 
+  const chamadasDoPerfil = perfil === 'professor'
+    ? historicoChamadas.filter(item => turmasProfessorDemo.ids.includes(item.turmaId))
+    : historicoChamadas;
+
+  const chamadasFiltradas = chamadasDoPerfil.filter(item =>
     item.turmaNome.toLowerCase().includes(busca.toLowerCase()) || item.dataFormatada.toLowerCase().includes(busca.toLowerCase())
   );
 
   const isBuscando = busca.trim().length > 0;
   
   // Lista Plana (Usada quando há pesquisa)
-  const boletinsFiltrados = boletins.filter(item => 
+  // Os boletins simulados têm nome de turma, sem turmaId ou professorId para relacioná-los diretamente.
+  const boletinsDoPerfil = perfil === 'professor'
+    ? boletins.filter(item => turmasProfessorDemo.nomes.includes(item.turma))
+    : boletins;
+
+  const boletinsFiltrados = boletinsDoPerfil.filter(item =>
     item.aluno.toLowerCase().includes(busca.toLowerCase()) || item.turma.toLowerCase().includes(busca.toLowerCase()) || item.disciplina.toLowerCase().includes(busca.toLowerCase())
   );
 
   // Lista Agrupada por Pastas (Usada quando NÃO há pesquisa)
-  const turmasUnicas = Array.from(new Set(boletins.map(b => b.turma)));
+  const turmasUnicas = Array.from(new Set(boletinsDoPerfil.map(b => b.turma)));
+
+  const mensagemSemResultado = busca.trim()
+    ? 'Nenhum resultado encontrado para a pesquisa.'
+    : abaAtiva === 'frequencia' && perfil === 'professor'
+      ? 'Nenhum diário de classe encontrado para as turmas deste professor.'
+      : abaAtiva === 'notas' && perfil === 'professor'
+        ? 'Não há alunos ou notas nas turmas atribuídas a este professor.'
+        : 'Nenhum registro disponível.';
 
   const toggleTurma = (turmaNome: string) => {
     if (turmasExpandidas.includes(turmaNome)) {
@@ -185,7 +216,7 @@ export default function HistoricoScreen() {
       // Se NÃO estiver a pesquisar, 'item' é uma string (nome da turma). Renderiza a Pasta (Acordeão).
       const turmaNome = item;
       const isExpanded = turmasExpandidas.includes(turmaNome);
-      const alunosDaTurma = boletins.filter(b => b.turma === turmaNome);
+      const alunosDaTurma = boletinsDoPerfil.filter(b => b.turma === turmaNome);
 
       return (
         <View style={{ marginBottom: 15 }}>
@@ -199,7 +230,9 @@ export default function HistoricoScreen() {
               <Text style={[styles.tituloPasta, { color: tema.textoPrincipal }]}>{turmaNome}</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={{ color: tema.textoSecundario, fontSize: 12, marginRight: 8, fontWeight: 'bold' }}>{alunosDaTurma.length} alunos</Text>
+              <Text style={{ color: tema.textoSecundario, fontSize: 12, marginRight: 8, fontWeight: 'bold' }}>
+                {alunosDaTurma.length} {alunosDaTurma.length === 1 ? 'aluno' : 'alunos'}
+              </Text>
               <Ionicons name={isExpanded ? "chevron-down" : "chevron-forward"} size={20} color={tema.textoSecundario} />
             </View>
           </TouchableOpacity>
@@ -219,7 +252,16 @@ export default function HistoricoScreen() {
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: tema.fundoBase }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
         <Text style={[styles.tituloHeader, { color: tema.textoLogo }]}>Central de Consultas</Text>
-        <Text style={[styles.subtituloHeader, { color: tema.textoLogo }]}>Auditoria de faltas e desempenho</Text>
+        <Text style={[styles.subtituloHeader, { color: tema.textoLogo }]}>
+          {perfil === 'coordenador'
+            ? 'Acompanhamento pedagógico de frequência e desempenho'
+            : perfil === 'professor'
+              ? 'Diários e notas das turmas atribuídas'
+              : 'Auditoria geral de frequência e desempenho'}
+        </Text>
+        <View style={styles.badgeDemonstracao}>
+          <Text style={styles.textoBadgeDemonstracao}>Modo demonstração</Text>
+        </View>
         
         {/* ABAS INTERNAS (SEGMENTED CONTROL) */}
         <View style={styles.tabContainer}>
@@ -249,10 +291,10 @@ export default function HistoricoScreen() {
         </View>
       </View>
 
-      {carregando && abaAtiva === 'frequencia' ? (
+      {carregando && (abaAtiva === 'frequencia' || perfil === 'professor') ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <ActivityIndicator size="large" color={tema.botaoPrimario} />
-          <Text style={{ marginTop: 10, color: tema.textoSecundario }}>Sincronizando registros...</Text>
+          <Text style={{ marginTop: 10, color: tema.textoSecundario }}>Carregando registros...</Text>
         </View>
       ) : (
         <FlatList 
@@ -265,7 +307,7 @@ export default function HistoricoScreen() {
           ListEmptyComponent={
             <View style={{ alignItems: 'center', marginTop: 40 }}>
               <Ionicons name="search-outline" size={50} color={tema.borda} />
-              <Text style={{ textAlign: 'center', marginTop: 15, color: tema.textoSecundario, fontSize: 16 }}>Nenhum resultado encontrado.</Text>
+              <Text style={{ textAlign: 'center', marginTop: 15, color: tema.textoSecundario, fontSize: 16 }}>{mensagemSemResultado}</Text>
             </View>
           }
         />
@@ -279,6 +321,8 @@ const styles = StyleSheet.create({
   header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 20, elevation: 5, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
   tituloHeader: { fontSize: 24, fontWeight: 'bold' },
   subtituloHeader: { fontSize: 13, opacity: 0.8, marginBottom: 15, marginTop: 2 },
+  badgeDemonstracao: { alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 15, backgroundColor: 'rgba(255,255,255,0.15)' },
+  textoBadgeDemonstracao: { color: '#FFF', fontSize: 11, fontWeight: '600' },
   
   tabContainer: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 4, marginBottom: 15 },
   tabButton: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },

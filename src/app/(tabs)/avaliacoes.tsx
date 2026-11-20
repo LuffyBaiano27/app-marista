@@ -1,28 +1,28 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   View, Text, StyleSheet, FlatList, TouchableOpacity, useColorScheme, Platform, KeyboardAvoidingView 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { cores } from '../../constants/colors';
 import { useRouter } from 'expo-router';
+import { useDemoProfile } from '../../contexts/demoProfileContext';
 
 export default function AvaliacoesScreen() {
   const router = useRouter();
+  const { perfil } = useDemoProfile();
   const isDarkMode = useColorScheme() === 'dark';
   const tema = isDarkMode ? cores.dark : cores.light;
 
-  const [tipoUsuario, setTipoUsuario] = useState<'professor' | 'coordenador'>('professor');
-
   const avaliacoesProfessor = [
-    { id: '1', titulo: '1ª Avaliação Bimestral', turma: '6º Ano A', materia: 'Matemática', periodo: '15/09 a 22/09', status: 'aberto' },
+    { id: '1', titulo: '1ª Avaliação Bimestral', turma: '6º Ano A', materia: 'Matemática', periodo: '15/09 a 22/09', status: 'fechado' },
     { id: '2', titulo: 'Teste Mensal', turma: '7º Ano B', materia: 'Matemática', periodo: '10/09 a 14/09', status: 'fechado' },
   ];
 
   // Adicionado a propriedade 'materia' no mock do coordenador
   const acompanhamentoCoordenador = [
-    { id: '1', turma: '6º Ano A', avaliacao: '1ª Av. Bimestral', materia: 'Matemática', professor: 'Prof. João', status: 'andamento' },
-    { id: '2', turma: '7º Ano B', avaliacao: '1ª Av. Bimestral', materia: 'Física', professor: 'Prof. Carlos', status: 'concluido' },
-    { id: '3', turma: '8º Ano A', avaliacao: '1ª Av. Bimestral', materia: 'Química', professor: 'Profª Ana', status: 'pendente' },
+    { id: '1', turma: '6º Ano A', avaliacao: '1ª Av. Bimestral', materia: 'Matemática', professor: 'Prof. Luffy Baiano', statusPrazo: 'fechado', status: 'andamento' },
+    { id: '2', turma: '7º Ano B', avaliacao: '1ª Av. Bimestral', materia: 'Física', professor: 'Prof. Carlos', statusPrazo: 'aberto', status: 'concluido' },
+    { id: '3', turma: '8º Ano A', avaliacao: '1ª Av. Bimestral', materia: 'Química', professor: 'Profª Ana', statusPrazo: 'aberto', status: 'pendente' },
   ];
 
   return (
@@ -33,16 +33,20 @@ export default function AvaliacoesScreen() {
           <View>
             <Text style={[styles.titulo, { color: tema.textoLogo }]}>Gestão de Avaliações</Text>
             <Text style={[styles.subtitulo, { color: tema.textoLogo, opacity: 0.8 }]}>
-              {tipoUsuario === 'professor' ? 'Lançamento de notas e prazos' : 'Painel de acompanhamento geral'}
+              {perfil === 'professor'
+                ? 'Lançamento de notas e prazos'
+                : perfil === 'coordenador'
+                  ? 'Acompanhamento pedagógico por professor'
+                  : 'Acompanhamento geral das avaliações'}
             </Text>
           </View>
-          <TouchableOpacity style={[styles.btnAlternar, { backgroundColor: tema.fundoBase + '30' }]} onPress={() => setTipoUsuario(tipoUsuario === 'professor' ? 'coordenador' : 'professor')}>
-            <Text style={[styles.textoAlternar, { color: tema.textoLogo }]}>Mudar para {tipoUsuario === 'professor' ? 'Coordenador' : 'Professor'}</Text>
-          </TouchableOpacity>
+          <Text style={[styles.perfilAtivo, { color: tema.textoLogo }]}>
+            {perfil === 'admin' ? 'Administrador' : perfil === 'coordenador' ? 'Coordenador' : 'Professor'}
+          </Text>
         </View>
       </View>
 
-      {tipoUsuario === 'professor' ? (
+      {perfil === 'professor' ? (
         <FlatList
           data={avaliacoesProfessor}
           keyExtractor={(item) => item.id}
@@ -56,7 +60,7 @@ export default function AvaliacoesScreen() {
                 style={[styles.card, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}
                 activeOpacity={0.7}
                 // ENVIANDO PARÂMETROS PARA A TELA DE NOTAS
-                onPress={() => router.push({ pathname: '/notas', params: { avaliacao: item.titulo, turma: item.turma, materia: item.materia, status: item.status, visao: 'professor' } })}
+                onPress={() => router.push({ pathname: '/notas', params: { avaliacao: item.titulo, turma: item.turma, materia: item.materia, status: item.status } })}
               >
                 <View style={styles.cardHeader}>
                   <Text style={[styles.cardTitle, { color: tema.textoPrincipal }]}>{item.titulo}</Text>
@@ -82,7 +86,11 @@ export default function AvaliacoesScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-          ListHeaderComponent={<Text style={[styles.sectionTitle, { color: tema.textoPrincipal }]}>Status de Lançamento por Professor</Text>}
+          ListHeaderComponent={
+            <Text style={[styles.sectionTitle, { color: tema.textoPrincipal }]}>
+              {perfil === 'admin' ? 'Visão geral das avaliações' : 'Status de Lançamento por Professor'}
+            </Text>
+          }
           renderItem={({ item }) => {
             const statusCor = item.status === 'concluido' ? '#2E7D32' : item.status === 'andamento' ? '#1565C0' : '#E65100';
             const statusTexto = item.status === 'concluido' ? 'Concluído' : item.status === 'andamento' ? 'Em andamento' : 'Pendente';
@@ -92,7 +100,7 @@ export default function AvaliacoesScreen() {
                 style={[styles.card, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}
                 activeOpacity={0.7}
                 // ENVIANDO PARÂMETROS PARA A TELA DE NOTAS
-                onPress={() => router.push({ pathname: '/notas', params: { avaliacao: item.avaliacao, turma: item.turma, materia: item.materia, status: 'aberto', visao: 'coordenador' } })}
+                onPress={() => router.push({ pathname: '/notas', params: { avaliacao: item.avaliacao, turma: item.turma, materia: item.materia, status: item.statusPrazo } })}
               >
                 <View style={styles.cardHeader}>
                   <Text style={[styles.cardTitle, { color: tema.textoPrincipal }]}>{item.turma}</Text>
@@ -119,8 +127,7 @@ const styles = StyleSheet.create({
   headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   titulo: { fontSize: 22, fontWeight: 'bold' },
   subtitulo: { fontSize: 13, marginTop: 2 },
-  btnAlternar: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
-  textoAlternar: { fontSize: 11, fontWeight: 'bold' },
+  perfilAtivo: { fontSize: 11, fontWeight: 'bold', marginLeft: 8 },
   listContent: { padding: 20, paddingBottom: 40 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 15 },
   card: { borderWidth: 1, borderRadius: 12, padding: 15, marginBottom: 14 },

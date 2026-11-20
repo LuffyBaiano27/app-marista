@@ -1,34 +1,45 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, ScrollView, Alert, Modal, TextInput, KeyboardAvoidingView, Platform, FlatList } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, ScrollView, Alert, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { cores } from '../constants/colors';
+import { cores } from '../../constants/colors';
 import { useRouter } from 'expo-router';
+import { useDemoProfile } from '../../contexts/demoProfileContext';
 
 // FIREBASE
-import { collection, addDoc, getDocs, updateDoc, doc, query } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '../../config/firebase';
 
 export default function PerfilScreen() {
   const router = useRouter();
   const isDarkMode = useColorScheme() === 'dark';
   const tema = isDarkMode ? cores.dark : cores.light;
+  const { perfil, setPerfil } = useDemoProfile();
 
-  const [cargoUsuario, setCargoUsuario] = useState('Professor'); 
   const [sincronizando, setSincronizando] = useState(false);
+  const nomesPerfis = {
+    admin: 'Administrador',
+    coordenador: 'Coordenador',
+    professor: 'Professor',
+  };
+
+  const identidadesDemonstrativas = {
+    admin: { nome: 'Marina Andrade', email: 'marina@violeta.com', iniciais: 'MA' },
+    coordenador: { nome: 'Camila Rocha', email: 'camila@violeta.com', iniciais: 'CR' },
+    professor: { nome: 'Luffy Baiano', email: 'luffy@violeta.com', iniciais: 'LB' },
+  };
 
   const usuario = {
-    nome: 'Luffy Baiano',
-    email: 'admin@violeta.com',
-    cargo: cargoUsuario, 
-    iniciais: 'LB'
+    ...identidadesDemonstrativas[perfil],
+    cargo: nomesPerfis[perfil],
   };
+  // Chamados mantêm a identificação original, independente do perfil demonstrativo exibido.
+  const nomeSolicitanteChamado = 'Luffy Baiano';
 
   const [modalDados, setModalDados] = useState(false);
   const [modalPrivacidade, setModalPrivacidade] = useState(false);
   const [modalVersao, setModalVersao] = useState(false);
   const [modalAjuda, setModalAjuda] = useState(false);
   const [modalAviso, setModalAviso] = useState(false);
-  const [modalAdminChamados, setModalAdminChamados] = useState(false);
   
   // ESTADOS DO PERFIL
   const [formDados, setFormDados] = useState({
@@ -44,31 +55,6 @@ export default function PerfilScreen() {
   const [textoChamado, setTextoChamado] = useState('');
   const [tituloAviso, setTituloAviso] = useState('');
   const [mensagemAviso, setMensagemAviso] = useState('');
-  
-  const [chamadoSelecionado, setChamadoSelecionado] = useState<any>(null);
-  const [chamados, setChamados] = useState<any[]>([]);
-
-  const buscarChamados = async () => {
-    try {
-      const q = query(collection(db, 'chamados_suporte'));
-      const snap = await getDocs(q);
-      const lista: any[] = [];
-      snap.forEach(d => lista.push({ id: d.id, ...d.data() }));
-      
-      lista.sort((a, b) => {
-        if (a.status !== b.status) return a.status === 'pendente' ? -1 : 1;
-        return b.timestamp - a.timestamp;
-      });
-      
-      setChamados(lista);
-    } catch (error) {
-      console.error("Erro ao buscar chamados:", error);
-    }
-  };
-
-  useEffect(() => {
-    buscarChamados();
-  }, [cargoUsuario, modalAdminChamados]);
 
   const handleVoltar = () => {
     if (router.canGoBack()) router.back();
@@ -118,7 +104,7 @@ export default function PerfilScreen() {
     try {
       const agora = new Date();
       await addDoc(collection(db, 'chamados_suporte'), {
-        solicitante: `${usuario.nome} (${usuario.cargo})`,
+        solicitante: `${nomeSolicitanteChamado} (${usuario.cargo})`,
         data: agora.toLocaleDateString('pt-BR'),
         hora: agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         descricao: textoChamado,
@@ -131,21 +117,8 @@ export default function PerfilScreen() {
       
       setModalAjuda(false);
       setTextoChamado('');
-      buscarChamados(); 
     } catch (error: any) {
       Platform.OS === 'web' ? window.alert("Erro: " + error.message) : Alert.alert("Erro", error.message);
-    }
-  };
-
-  const resolverChamado = async (id: string) => {
-    try {
-      await updateDoc(doc(db, 'chamados_suporte', id), { status: 'resolvido' });
-      setChamados(prev => prev.map(c => c.id === id ? { ...c, status: 'resolvido' } : c));
-      setChamadoSelecionado(null);
-      if (Platform.OS === 'web') window.alert("Sucesso!\nChamado finalizado e arquivado!");
-      else Alert.alert("Sucesso", "Chamado finalizado e arquivado!");
-    } catch (error: any) {
-      Platform.OS === 'web' ? window.alert("Erro ao resolver chamado.") : Alert.alert("Erro", "Não foi possível resolver o chamado.");
     }
   };
 
@@ -196,22 +169,22 @@ export default function PerfilScreen() {
         <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
           <View style={styles.headerTopRow}>
             <TouchableOpacity onPress={handleVoltar} style={styles.btnVoltar}><Ionicons name="arrow-back" size={26} color={tema.textoLogo} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => setCargoUsuario(cargoUsuario === 'Professor' ? 'Coordenador' : cargoUsuario === 'Coordenador' ? 'Admin' : 'Professor')} style={styles.btnToggleCargo}>
+            <TouchableOpacity onPress={() => setPerfil(perfil === 'admin' ? 'coordenador' : perfil === 'coordenador' ? 'professor' : 'admin')} style={styles.btnToggleCargo}>
               <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>Simular Perfil</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.avatarContainer}><Text style={styles.avatarText}>{usuario.iniciais}</Text></View>
           <Text style={[styles.nomeUsuario, { color: tema.textoLogo }]}>{usuario.nome}</Text>
-          <View style={[styles.badgeCargo, { backgroundColor: cargoUsuario === 'Admin' ? '#D32F2F' : cargoUsuario === 'Coordenador' ? '#E65100' : 'rgba(255,255,255,0.2)' }]}><Text style={styles.textoBadge}>{usuario.cargo}</Text></View>
+          <View style={[styles.badgeCargo, { backgroundColor: perfil === 'admin' ? '#D32F2F' : perfil === 'coordenador' ? '#E65100' : 'rgba(255,255,255,0.2)' }]}><Text style={styles.textoBadge}>{usuario.cargo}</Text></View>
           <Text style={[styles.emailUsuario, { color: tema.textoLogo }]}>{usuario.email}</Text>
         </View>
 
-        {cargoUsuario === 'Admin' ? (
+        {perfil === 'admin' ? (
           <>
             <View style={styles.section}>
               <Text style={[styles.sectionTitle, { color: '#D32F2F' }]}>Infraestrutura e Permissões</Text>
               <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: '#D32F2F' }]}>
-                <MenuOption icone="shield-checkmark" titulo="Controle de Acessos" subtitulo="Aprovar/bloquear usuários" corIcone="#D32F2F" onPress={() => handleAlertaDesenvolvimento('ACL e Usuários')} />
+                <MenuOption icone="shield-checkmark" titulo="Controle de Acessos" subtitulo="Aprovar/bloquear usuários" corIcone="#D32F2F" onPress={() => router.push('/usuarios')} />
                 <MenuOption icone="list-circle" titulo="Logs de Auditoria" subtitulo="Rastrear exclusões e alterações" corIcone="#D32F2F" onPress={() => handleAlertaDesenvolvimento('Auditoria do Sistema')} />
                 <MenuOption icone="business" titulo="Dados da Instituição" subtitulo="Ano letivo, feriados e regras" corIcone="#D32F2F" onPress={() => handleAlertaDesenvolvimento('Configurações Globais')} />
               </View>
@@ -227,7 +200,7 @@ export default function PerfilScreen() {
           </>
         ) : (
           <>
-            {cargoUsuario === 'Coordenador' && (
+            {perfil === 'coordenador' && (
               <View style={styles.section}>
                 <Text style={[styles.sectionTitle, { color: '#E65100' }]}>Gestão Acadêmica</Text>
                 <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: '#E65100' }]}>
@@ -243,7 +216,15 @@ export default function PerfilScreen() {
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: tema.textoSecundario }]}>Sua Conta</Text>
           <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-            <MenuOption icone="person" titulo="Meus Dados" corIcone={tema.botaoPrimario} onPress={() => setModalDados(true)} />
+            <MenuOption
+              icone="person"
+              titulo="Meus Dados"
+              corIcone={tema.botaoPrimario}
+              onPress={() => {
+                setFormDados((dados) => ({ ...dados, nome: usuario.nome }));
+                setModalDados(true);
+              }}
+            />
             <MenuOption icone="shield-checkmark" titulo="Segurança e Preferências" corIcone={tema.botaoPrimario} onPress={() => setModalPrivacidade(true)} />
           </View>
         </View>
@@ -251,8 +232,8 @@ export default function PerfilScreen() {
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: tema.textoSecundario }]}>Sistema Violeta</Text>
           <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-            {cargoUsuario === 'Admin' ? (
-              <MenuOption icone="construct" titulo="Gerenciar Chamados" subtitulo="Resolver tickets da TI" corIcone="#D32F2F" onPress={() => { setChamadoSelecionado(null); setModalAdminChamados(true); }} />
+            {perfil === 'admin' ? (
+              <MenuOption icone="construct" titulo="Gerenciar Chamados" subtitulo="Resolver tickets da TI" corIcone="#D32F2F" onPress={() => router.push('/chamados')} />
             ) : (
               <MenuOption icone="help-buoy" titulo="Central de Suporte" subtitulo="Abrir chamado técnico" onPress={() => setModalAjuda(true)} />
             )}
@@ -380,63 +361,6 @@ export default function PerfilScreen() {
             </View>
           </TouchableOpacity>
         </TouchableOpacity>
-      </Modal>
-
-      {/* MODAL: ADMIN CHAMADOS */}
-      <Modal visible={modalAdminChamados} transparent={true} animationType="slide">
-        <View style={styles.modalOverlayFull}>
-          <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
-              {chamadoSelecionado ? (
-                <TouchableOpacity onPress={() => setChamadoSelecionado(null)} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Ionicons name="arrow-back" size={24} color={tema.textoPrincipal} />
-                  <Text style={[styles.modalTitle, { color: tema.textoPrincipal, marginLeft: 10 }]}>Voltar</Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Tickets da TI</Text>
-              )}
-              <TouchableOpacity onPress={() => setModalAdminChamados(false)} style={styles.btnFecharModal}>
-                <Ionicons name="close" size={24} color={tema.textoSecundario} />
-              </TouchableOpacity>
-            </View>
-
-            {chamadoSelecionado ? (
-              <View style={styles.modalBody}>
-                <Text style={{ color: tema.textoSecundario, marginBottom: 15 }}>Aberto em: {chamadoSelecionado.data} às {chamadoSelecionado.hora}</Text>
-                <Text style={[styles.inputLabel, { color: tema.textoPrincipal }]}>Solicitante:</Text>
-                <Text style={{ color: tema.textoSecundario, marginBottom: 15 }}>{chamadoSelecionado.solicitante}</Text>
-                <Text style={[styles.inputLabel, { color: tema.textoPrincipal }]}>Descrição do Problema:</Text>
-                <View style={{ borderWidth: 1, borderColor: tema.borda, borderRadius: 10, padding: 15, backgroundColor: tema.inputBackground }}>
-                  <Text style={{ color: tema.textoPrincipal }}>{chamadoSelecionado.descricao}</Text>
-                </View>
-                {chamadoSelecionado.status === 'pendente' && (
-                  <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: '#2E7D32', marginTop: 30 }]} onPress={() => resolverChamado(chamadoSelecionado.id)}>
-                    <Text style={styles.textoBtnLargo}>Marcar como Resolvido</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            ) : (
-              <FlatList
-                data={chamados}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={{ padding: 20 }}
-                renderItem={({ item }) => (
-                  <TouchableOpacity 
-                    style={{ borderWidth: 1, borderColor: tema.borda, borderRadius: 12, padding: 15, marginBottom: 12, backgroundColor: tema.inputBackground, opacity: item.status === 'resolvido' ? 0.6 : 1 }} 
-                    onPress={() => setChamadoSelecionado(item)}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                      <Ionicons name={item.status === 'resolvido' ? "checkmark-circle" : "warning"} size={20} color={item.status === 'resolvido' ? '#2E7D32' : '#E65100'} style={{ marginRight: 8 }} />
-                      <Text style={{ color: tema.textoPrincipal, fontSize: 16, fontWeight: 'bold' }}>{item.solicitante}</Text>
-                    </View>
-                    <Text style={{ color: tema.textoSecundario, fontSize: 12 }}>{item.data} às {item.hora}</Text>
-                  </TouchableOpacity>
-                )}
-                ListEmptyComponent={<Text style={{ textAlign: 'center', color: tema.textoSecundario, marginTop: 20 }}>Nenhum chamado aberto.</Text>}
-              />
-            )}
-          </View>
-        </View>
       </Modal>
 
       {/* MODAL: VERSÃO DO APLICATIVO */}
