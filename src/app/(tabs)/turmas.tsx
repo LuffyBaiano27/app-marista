@@ -3,15 +3,23 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, useColorScheme, Tex
 import { Ionicons } from '@expo/vector-icons';
 import { cores } from '../../constants/colors';
 import { useRouter } from 'expo-router';
+import { useDemoProfile, type DemoProfile } from '../../contexts/demoProfileContext';
 
 // FIREBASE
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../../config/firebase'; 
 
 const USUARIO_LOGADO = { id: 'prof_1', nome: 'Luffy Baiano', cargo: 'Admin' };
+const ID_PROFESSOR_DEMONSTRATIVO = 'prof_1';
+const NOMES_PERFIS: Record<DemoProfile, string> = {
+  admin: 'Administrador',
+  coordenador: 'Coordenador',
+  professor: 'Professor',
+};
 
 export default function TurmasScreen() {
   const router = useRouter();
+  const { perfil } = useDemoProfile();
   const isDarkMode = useColorScheme() === 'dark';
   const tema = isDarkMode ? cores.dark : cores.light;
 
@@ -86,7 +94,12 @@ export default function TurmasScreen() {
     buscarDadosTurmas();
   }, []);
 
-  const turmasFiltradas = turmas.filter(t => 
+  // O perfil demonstrativo altera somente a lista exibida; as consultas e ações permanecem inalteradas.
+  const turmasDoPerfil = perfil === 'professor'
+    ? turmas.filter(t => t.professorId === ID_PROFESSOR_DEMONSTRATIVO)
+    : turmas;
+
+  const turmasFiltradas = turmasDoPerfil.filter(t =>
     t.nome.toLowerCase().includes(busca.toLowerCase()) || 
     t.diaSemana.toLowerCase().includes(busca.toLowerCase()) ||
     t.horario.includes(busca) ||
@@ -175,9 +188,16 @@ export default function TurmasScreen() {
       <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
           <Text style={[styles.tituloHeader, { color: tema.textoLogo }]}>Grade de Aulas</Text>
-          <Text style={{color: tema.textoLogo, opacity: 0.5, fontSize: 12}}>Modo: {USUARIO_LOGADO.cargo}</Text>
+          <Text style={{color: tema.textoLogo, opacity: 0.7, fontSize: 12}}>{NOMES_PERFIS[perfil]}</Text>
         </View>
         <Text style={[styles.subtituloData, { color: tema.textoLogo }]}>{dataHeader}</Text>
+        <Text style={[styles.subtituloPerfil, { color: tema.textoLogo }]}>
+          {perfil === 'coordenador'
+            ? 'Acompanhamento pedagógico'
+            : perfil === 'professor'
+              ? 'Visão docente'
+              : 'Visão geral da instituição'} · Modo demonstração
+        </Text>
         
         <View style={[styles.searchContainer, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
           <Ionicons name="search" size={20} color={tema.textoSecundario} style={styles.searchIcon} />
@@ -204,7 +224,13 @@ export default function TurmasScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={carregando} onRefresh={buscarDadosTurmas} tintColor={tema.botaoPrimario} />}
-          ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 20, color: tema.textoSecundario }}>Nenhuma turma encontrada.</Text>}
+          ListEmptyComponent={
+            <Text style={{ textAlign: 'center', marginTop: 20, color: tema.textoSecundario }}>
+              {perfil === 'professor' && !busca.trim()
+                ? 'Nenhuma turma vinculada ao perfil docente.'
+                : 'Nenhuma turma encontrada.'}
+            </Text>
+          }
         />
       )}
     </KeyboardAvoidingView>
@@ -215,7 +241,8 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 20, elevation: 5, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
   tituloHeader: { fontSize: 24, fontWeight: 'bold' },
-  subtituloData: { fontSize: 13, opacity: 0.8, marginBottom: 20, marginTop: 2 },
+  subtituloData: { fontSize: 13, opacity: 0.8, marginBottom: 2, marginTop: 2 },
+  subtituloPerfil: { fontSize: 11, opacity: 0.75, marginBottom: 20 },
   searchContainer: { flexDirection: 'row', alignItems: 'center', height: 45, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10 },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, height: '100%', fontSize: 14 },
