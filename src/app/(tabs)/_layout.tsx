@@ -57,7 +57,7 @@ export default function TabLayout() {
               tabBarItemStyle: nome === 'perfil' || (nome === 'historico' && perfil === 'admin')
                 ? { display: 'none' }
                 : undefined,
-              tabBarIcon: ({ color }) => <Ionicons name={configuracao.icone} size={24} color={color} />,
+              tabBarIcon: ({ color }) => <Ionicons name={configuracao.icone} size={24} color={typeof color === 'string' ? color : undefined} />,
             }}
           />
         );
