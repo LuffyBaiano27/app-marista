@@ -1,7 +1,6 @@
+import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { cores } from '../../constants/colors';
-import { useColorScheme } from 'react-native';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
 
 const CONFIGURACAO_ABAS = {
@@ -15,15 +14,13 @@ const CONFIGURACAO_ABAS = {
 };
 
 export default function TabLayout() {
-  const { perfil } = useDemoProfile();
-  const isDarkMode = useColorScheme() === 'dark';
-  const tema = isDarkMode ? cores.dark : cores.light;
+  const { perfil, temaAtivo: tema } = useDemoProfile();
   const ordemAbas = perfil === 'admin'
     ? ['index', 'usuarios', 'turmas', 'chamados', 'historico', 'avaliacoes', 'perfil'] as const
     : ['index', 'turmas', 'usuarios', 'chamados', 'historico', 'avaliacoes', 'perfil'] as const;
 
   return (
-    <Tabs 
+    <Tabs
       screenOptions={{
         tabBarActiveTintColor: tema.botaoPrimario,
         tabBarInactiveTintColor: tema.textoSecundario,
@@ -57,7 +54,13 @@ export default function TabLayout() {
               tabBarItemStyle: nome === 'perfil' || (nome === 'historico' && perfil === 'admin')
                 ? { display: 'none' }
                 : undefined,
-              tabBarIcon: ({ color }) => <Ionicons name={configuracao.icone} size={24} color={typeof color === 'string' ? color : undefined} />,
+              tabBarIcon: ({ color }) => (
+                <Ionicons
+                  name={configuracao.icone}
+                  size={24}
+                  color={typeof color === 'string' ? color : undefined}
+                />
+              ),
             }}
           />
         );

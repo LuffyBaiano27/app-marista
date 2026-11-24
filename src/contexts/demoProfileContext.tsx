@@ -1,37 +1,42 @@
-import {
-  createContext,
-  useContext,
-  useState,
-  type Dispatch,
-  type PropsWithChildren,
-  type SetStateAction,
-} from 'react';
+import React, { createContext, useContext, useMemo, useState } from 'react';
+import { useColorScheme } from 'react-native';
+import { cores } from '../constants/colors';
 
 export type DemoProfile = 'admin' | 'coordenador' | 'professor';
+export type ModoTema = 'Sistema' | 'Claro' | 'Escuro';
 
-interface DemoProfileContextValue {
+interface DemoProfileContextData {
   perfil: DemoProfile;
-  setPerfil: Dispatch<SetStateAction<DemoProfile>>;
+  setPerfil: (perfil: DemoProfile) => void;
+  modoTema: ModoTema;
+  setModoTema: (modo: ModoTema) => void;
+  temaAtivo: typeof cores.dark;
 }
 
-const DemoProfileContext = createContext<DemoProfileContextValue | null>(null);
+const DemoProfileContext = createContext<DemoProfileContextData>({
+  perfil: 'admin',
+  setPerfil: () => {},
+  modoTema: 'Sistema',
+  setModoTema: () => {},
+  temaAtivo: cores.dark,
+});
 
-export function DemoProfileProvider({ children }: PropsWithChildren) {
+export function DemoProfileProvider({ children }: { children: React.ReactNode }) {
   const [perfil, setPerfil] = useState<DemoProfile>('admin');
+  const [modoTema, setModoTema] = useState<ModoTema>('Sistema');
+  const esquemaSistema = useColorScheme();
+
+  const temaAtivo = useMemo(() => {
+    if (modoTema === 'Claro') return cores.light;
+    if (modoTema === 'Escuro') return cores.dark;
+    return esquemaSistema === 'dark' ? cores.dark : cores.light;
+  }, [modoTema, esquemaSistema]);
 
   return (
-    <DemoProfileContext.Provider value={{ perfil, setPerfil }}>
+    <DemoProfileContext.Provider value={{ perfil, setPerfil, modoTema, setModoTema, temaAtivo }}>
       {children}
     </DemoProfileContext.Provider>
   );
 }
 
-export function useDemoProfile() {
-  const context = useContext(DemoProfileContext);
-
-  if (!context) {
-    throw new Error('useDemoProfile must be used within a DemoProfileProvider');
-  }
-
-  return context;
-}
+export const useDemoProfile = () => useContext(DemoProfileContext);
