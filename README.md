@@ -9,9 +9,11 @@ O **Sistema Violeta** é um SaaS educacional desenvolvido em **React Native (Exp
 - **Ícones:** Ionicons (Expo Vector Icons)
 
 ## 📌 Funcionalidades Principais
-- **Dashboard Personalizado:** Métricas em tempo real e ações adaptadas ao perfil (`Admin`, `Coordenador` e `Professor`).
-- **Diário de Classe Digital:** Registro de frequência com janela de 24h e bloqueio automático após assinatura.
-- **Central de Auditoria & Consultas:** Histórico administrativo, chamados encerrados, diários e consulta de alunos/notas.
+- **Dashboard Personalizado:** Métricas em tempo real, cronograma semanal e ações adaptadas ao perfil (`Admin`, `Coordenador` e `Professor`).
+- **Diário de Classe Digital:** Registro de frequência (`P`, `F`, `J`), conteúdo ministrado, bloqueio após assinatura digital e consulta histórica por data e aula/turma.
+- **Gestão de Avaliações e Notas:** Agendamento de provas, salvamento de rascunhos, validação por senha docente e fluxo de retificação com a coordenação.
+- **Comunicados e Calendário:** Mural de avisos gerais e de pausas/recessos, além de lembretes privados de cobrança de notas.
+- **Central de Auditoria & Consultas:** Logs administrativos, chamados encerrados, diários assinados e consulta de alunos/notas.
 - **Gestão de Suporte Técnico:** Abertura, acompanhamento, resolução com auditoria e reabertura de chamados.
 - **Controle de Acessos & Preferências:** Permissões por cargo, tema global, escala de fonte, notificações e gerenciamento de sessões.
 
@@ -33,19 +35,20 @@ O **Sistema Violeta** é um SaaS educacional desenvolvido em **React Native (Exp
 - [x] Alteração de senha com confirmação, validação e aviso de desconexão das demais sessões.
 - [x] Seletores funcionais de tema e tamanho de fonte, toggle de notificações com ícone de sino e modal de **Sessões Ativas** (encerrar sessão individual ou encerrar outras sessões).
 - [x] Ferramentas administrativas: diagnóstico de integridade, backup em segundo plano e limpeza de registros de teste com confirmação própria no app.
+- [x] Calendário acadêmico/pausas (`instituicao/config`) com disparo automático de comunicado e abertura de chamados (`chamados_suporte`).
 
-#### Gestão Administrativa, Turmas, Usuários e Chamados
-- [x] **Home (`(tabs)/index.tsx`):** KPIs sincronizados, sincronização manual com horário, modais de **Novo Usuário** e **Nova Turma** e exportação **CSV**.
+#### Gestão Administrativa, Coordenação e Docência
+- [x] **Home (`(tabs)/index.tsx`):** KPIs sincronizados, sincronização manual com horário, modais de **Novo Usuário**, **Nova Turma**, **Cadastrar Aluno**, **Montar Grade**, **Publicar Comunicado** (com seletor compacto) e exportação **CSV**.
 - [x] **Usuários (`usuarios.tsx`):** ativar/inativar, editar dados e cargo, redefinir senha inicial, excluir usuário e proteção de conta de Administrador.
-- [x] **Turmas (`turmas.tsx`):** visão administrativa com resumo, filtro por turno, alunos por turma e modal de criar/editar/excluir (com bloqueio quando há alunos vinculados), além das visões de coordenação/docência.
+- [x] **Turmas (`turmas.tsx`):** visão administrativa com CRUD e transferência de alunos na coordenação, e visão docente com filtro por dia da semana, aulas de hoje em destaque e consulta de alunos.
+- [x] **Avaliações e Notas (`avaliacoes.tsx` e `notas.tsx`):** gestão de avaliações/prazos, cobrança privada de notas, salvamento de rascunhos, validação por senha e retificação.
 - [x] **Chamados (`chamados.tsx`):** criação, filtros, **Auditoria de Resolução** com nota técnica, encerramento e reabertura.
-- [x] **Histórico (`historico.tsx`):** botão de voltar e abas organizadas por perfil.
+- [x] **Histórico (`historico.tsx`):** consulta de diários assinados por data e aula/turma, visualização detalhada da frequência e aba de alunos e notas.
 
 ### 🟡 Próximos Passos
-- [ ] **Perfis de Professor e Coordenador:** aplicar e revisar as modificações específicas das telas, fluxos e ações para os perfis de Professor e Coordenador.
-- [ ] **Validação em Build:** testar todo o fluxo de tema global, fonte, modais e notificações na build mobile e na web.
-- [ ] **Coordenação:** implementar fluxo de cadastro e alocação de novos alunos nas turmas.
+- [ ] **Validação em Build:** testar todo o fluxo de tema global, fonte, modais, rascunhos e notificações na build mobile e na web.
 - [ ] **Identidade Visual:** adicionar o arquivo do ícone oficial do app e vinculá-lo na tela inicial.
+
 ---
 
 ## 💻 Como Rodar o Projeto
@@ -65,6 +68,8 @@ Inicie o servidor Expo:
 
 Bash
 npx expo start -c
+
+
 🔐 Configuração do Firebase
 Crie um arquivo .env.local na raiz do projeto com as variáveis do Firebase:
 

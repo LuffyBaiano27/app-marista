@@ -41,8 +41,9 @@ export default function TabLayout() {
           : configuracao.titulo;
         const ocultar = (nome === 'usuarios' && perfil === 'professor') ||
           (nome === 'chamados' && perfil !== 'admin') ||
-          (nome === 'historico' && perfil === 'coordenador') ||
           (nome === 'avaliacoes' && perfil === 'admin');
+        const esconderDaBarra = nome === 'perfil' ||
+          (nome === 'historico' && (perfil === 'admin' || perfil === 'coordenador'));
 
         return (
           <Tabs.Screen
@@ -51,9 +52,7 @@ export default function TabLayout() {
             options={{
               title: titulo,
               href: ocultar ? null : undefined,
-              tabBarItemStyle: nome === 'perfil' || (nome === 'historico' && perfil === 'admin')
-                ? { display: 'none' }
-                : undefined,
+              tabBarItemStyle: esconderDaBarra ? { display: 'none' } : undefined,
               tabBarIcon: ({ color }) => (
                 <Ionicons
                   name={configuracao.icone}

@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator, Modal, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
 import { db } from '../../config/firebase';
@@ -13,12 +13,6 @@ const LOGS_SISTEMA_FALLBACK = [
 ];
 const CHAMADOS_ENCERRADOS_FALLBACK = [
   { id: 'ch_1', titulo: 'Erro ao sincronizar turma 6º Ano A', detalhe: 'Resolvido por Marina Andrade', dataFormatada: 'Hoje, 18:40' },
-];
-const BOLETINS_DEMO = [
-  { id: 'b1', aluno: 'Ana Carolina', turma: '1º Ano Médio', disciplina: 'Matemática', notas: { un1: 8.5, un2: null, un3: null, un4: null } },
-  { id: 'b2', aluno: 'Carlos Eduardo', turma: '1º Ano Médio', disciplina: 'Matemática', notas: { un1: 5.5, un2: null, un3: null, un4: null } },
-  { id: 'b3', aluno: 'Mariana Silva', turma: '9º Ano C', disciplina: 'Física', notas: { un1: 9.0, un2: 8.5, un3: null, un4: null } },
-  { id: 'b4', aluno: 'João Pedro', turma: '6º Ano A', disciplina: 'Matemática', notas: { un1: 7.0, un2: 7.5, un3: 8.0, un4: null } },
 ];
 
 const formatarData = (dataInput: any) => {
@@ -34,41 +28,72 @@ const formatarData = (dataInput: any) => {
   return `${dataObjeto.toLocaleDateString('pt-BR')} às ${hora}`;
 };
 
+const formatarDataBrCurta = (dataInput: any) => {
+  if (!dataInput) return '';
+  const dataObjeto = dataInput?.toDate ? dataInput.toDate() : new Date(dataInput);
+  if (isNaN(dataObjeto.getTime())) return '';
+  return dataObjeto.toLocaleDateString('pt-BR');
+};
+
+const formatarInputDataFiltro = (valor: string) => {
+  const nums = valor.replace(/\D/g, '').slice(0, 8);
+  if (nums.length <= 2) return nums;
+  if (nums.length <= 4) return `${nums.slice(0, 2)}/${nums.slice(2)}`;
+  return `${nums.slice(0, 2)}/${nums.slice(2, 4)}/${nums.slice(4)}`;
+};
+
+const obterIniciais = (nome: string) => {
+  const partes = nome.trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return 'AL';
+  if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
+  return `${partes[0][0]}${partes[partes.length - 1][0]}`.toUpperCase();
+};
+
 export default function HistoricoScreen() {
   const router = useRouter();
   const { aba } = useLocalSearchParams<{ aba?: string }>();
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isAdmin = perfil === 'admin';
+  const isProf = perfil === 'professor';
 
   const [abaAtiva, setAbaAtiva] = useState<string>(isAdmin ? 'auditoria' : 'frequencia');
   const [busca, setBusca] = useState('');
+  const [filtroData, setFiltroData] = useState('');
+  const [filtroAula, setFiltroAula] = useState('');
+  const [dropdownAulaAberto, setDropdownAulaAberto] = useState(false);
+
   const [historicoChamadas, setHistoricoChamadas] = useState<any[]>([]);
+  const [boletinsReais, setBoletinsReais] = useState<any[]>([]);
   const [logsSistema, setLogsSistema] = useState<any[]>([]);
   const [chamadosEncerrados, setChamadosEncerrados] = useState<any[]>([]);
-  const [turmasProfessorDemo, setTurmasProfessorDemo] = useState<{ ids: string[]; nomes: string[] }>({ ids: [], nomes: [] });
   const [carregando, setCarregando] = useState(true);
   const [turmasExpandidas, setTurmasExpandidas] = useState<string[]>([]);
+  const [diarioSelecionado, setDiarioSelecionado] = useState<any | null>(null);
 
   useEffect(() => {
     setAbaAtiva(isAdmin ? (aba === 'chamados' ? 'chamados' : 'auditoria') : 'frequencia');
     setBusca('');
+    setFiltroData('');
+    setFiltroAula('');
+    setDropdownAulaAberto(false);
   }, [isAdmin, aba]);
 
   const buscarDados = useCallback(async () => {
     setCarregando(true);
     try {
-      const turmasSnap = await getDocs(collection(db, 'turmas'));
+      const [turmasSnap, gradeSnap] = await Promise.all([
+        getDocs(collection(db, 'turmas')),
+        getDocs(collection(db, 'grade_aulas')),
+      ]);
+
       const dicTurmas: Record<string, string> = {};
-      const turmasAtribuidas: { ids: string[]; nomes: string[] } = { ids: [], nomes: [] };
+      const idsTurmasProf = new Set<string>();
+      const nomesTurmasProf = new Set<string>();
       const logsMontados: any[] = [];
 
       turmasSnap.forEach(docSnap => {
         const turma = docSnap.data();
-        dicTurmas[docSnap.id] = turma.nome;
-        if (turma.professorId === ID_PROFESSOR_DEMONSTRATIVO) {
-          turmasAtribuidas.ids.push(docSnap.id);
-          if (typeof turma.nome === 'string') turmasAtribuidas.nomes.push(turma.nome);
-        }
+        dicTurmas[docSnap.id] = String(turma.nome || 'Turma');
         if (turma.criadoPor) {
           logsMontados.push({
             id: `turma_${docSnap.id}`, tipo: 'turma', titulo: 'Turma Cadastrada',
@@ -77,7 +102,17 @@ export default function HistoricoScreen() {
           });
         }
       });
-      setTurmasProfessorDemo(turmasAtribuidas);
+
+      gradeSnap.forEach(docSnap => {
+        const g = docSnap.data() as any;
+        dicTurmas[docSnap.id] = String(g.nome || dicTurmas[g.turmaId] || 'Turma');
+        const ehDoProf = g.professorId === ID_PROFESSOR_DEMONSTRATIVO || String(g.professorNome || '').toLowerCase().includes('luffy');
+        if (ehDoProf) {
+          idsTurmasProf.add(docSnap.id);
+          if (g.turmaId) idsTurmasProf.add(String(g.turmaId));
+          if (g.nome) nomesTurmasProf.add(String(g.nome));
+        }
+      });
 
       if (isAdmin) {
         try {
@@ -113,47 +148,150 @@ export default function HistoricoScreen() {
         setLogsSistema(logsMontados.length > 0 ? logsMontados : LOGS_SISTEMA_FALLBACK);
         setChamadosEncerrados(encerrados.length > 0 ? encerrados : CHAMADOS_ENCERRADOS_FALLBACK);
       } else {
-        const chamadasSnap = await getDocs(query(collection(db, 'chamadas'), orderBy('dataChamada', 'desc')));
+        const [chamadasSnap, notasSnap] = await Promise.all([
+          getDocs(query(collection(db, 'chamadas'), orderBy('dataChamada', 'desc'))),
+          getDocs(collection(db, 'notas')),
+        ]);
+
         const registrosMontados: any[] = [];
         chamadasSnap.forEach(docSnap => {
-          const dados = docSnap.data();
-          let presentes = 0, faltas = 0;
-          dados.alunos?.forEach((aluno: any) => {
-            if (aluno.presencas?.some((p: boolean) => p === false)) faltas++;
+          const dados = docSnap.data() as any;
+          const turmaNome = String(dados.turmaNome || dicTurmas[dados.turmaId] || 'Turma');
+          const ehDoProf =
+            idsTurmasProf.has(String(dados.turmaId || '')) ||
+            idsTurmasProf.has(String(dados.turmaRealId || '')) ||
+            nomesTurmasProf.has(turmaNome) ||
+            String(dados.professorNome || '').toLowerCase().includes('luffy');
+
+          if (isProf && idsTurmasProf.size > 0 && !ehDoProf) return;
+
+          const alunosLista = Array.isArray(dados.alunos) ? dados.alunos : [];
+          let presentes = 0;
+          let faltas = 0;
+          let justificadas = 0;
+          alunosLista.forEach((a: any) => {
+            if (a.status === 'falta') faltas++;
+            else if (a.status === 'justificada') justificadas++;
+            else if (a.status === 'presente') presentes++;
+            else if (Array.isArray(a.presencas) && a.presencas.some((p: boolean) => p === false)) faltas++;
             else presentes++;
           });
+
+          const dataBr = formatarDataBrCurta(dados.dataChamada) || String(dados.dataChamadaFormatada || '');
+          const rotuloAula = `${turmaNome} • ${String(dados.disciplina || 'Disciplina')}`;
+
           registrosMontados.push({
-            id: docSnap.id, turmaId: dados.turmaId,
-            turmaNome: dicTurmas[dados.turmaId] || 'Turma não encontrada',
-            dataFormatada: formatarData(dados.dataChamada), presentes, faltas,
+            id: docSnap.id,
+            turmaId: String(dados.turmaId || ''),
+            turmaNome,
+            disciplina: String(dados.disciplina || 'Disciplina'),
+            rotuloAula,
+            professorNome: String(dados.professorNome || ''),
+            horario: String(dados.horario || ''),
+            conteudoMinistrado: String(dados.conteudoMinistrado || ''),
+            dataChamadaFormatada: String(dados.dataChamadaFormatada || ''),
+            dataBr,
+            dataFormatada: formatarData(dados.dataChamada),
+            presentes,
+            faltas,
+            justificadas,
+            alunos: alunosLista,
           });
         });
         setHistoricoChamadas(registrosMontados);
+
+        const mapaBoletim = new Map<string, { id: string; aluno: string; turma: string; disciplina: string; avaliacoes: { titulo: string; nota: number; max: number }[] }>();
+        notasSnap.forEach(docSnap => {
+          const n = docSnap.data() as any;
+          const notaStr = String(n.nota ?? '').trim().replace(',', '.');
+          if (notaStr === '' || Number.isNaN(Number(notaStr))) return;
+
+          const turma = String(n.turma || 'Sem turma');
+          const disciplina = String(n.materia || 'Disciplina');
+          const aluno = String(n.alunoNome || 'Aluno');
+          const chave = `${turma}_${disciplina}_${n.alunoId || aluno}`;
+          const atual = mapaBoletim.get(chave) || { id: chave, aluno, turma, disciplina, avaliacoes: [] };
+          atual.avaliacoes.push({
+            titulo: String(n.avaliacao || 'Avaliação'),
+            nota: Number(notaStr),
+            max: Number(n.valorMaximo) > 0 ? Number(n.valorMaximo) : 10,
+          });
+          mapaBoletim.set(chave, atual);
+        });
+        const listaBoletins = Array.from(mapaBoletim.values()).sort((a, b) => a.aluno.localeCompare(b.aluno, 'pt-BR'));
+        setBoletinsReais(listaBoletins);
       }
     } catch (error) {
       console.error('Erro ao buscar histórico:', error);
     } finally {
       setCarregando(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, isProf]);
 
-  useEffect(() => { void buscarDados(); }, [buscarDados]);
+  useFocusEffect(
+    useCallback(() => {
+      void buscarDados();
+    }, [buscarDados])
+  );
 
   const voltarTela = () => (router.canGoBack() ? router.back() : router.push('/(tabs)'));
-  const isBuscando = busca.trim().length > 0;
+  const isBuscando = busca.trim().length > 0 || filtroData.trim().length > 0 || filtroAula.trim().length > 0;
   const termo = busca.toLowerCase();
+
+  const opcoesAula = useMemo(() => {
+    const setAulas = new Set<string>();
+    historicoChamadas.forEach(c => { if (c.rotuloAula) setAulas.add(c.rotuloAula); });
+    return Array.from(setAulas).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [historicoChamadas]);
 
   const logsFiltrados = logsSistema.filter(l => [l.titulo, l.detalhe, l.dataFormatada].some(v => v?.toLowerCase().includes(termo)));
   const chamadosFiltrados = chamadosEncerrados.filter(c => [c.titulo, c.detalhe, c.dataFormatada].some(v => v?.toLowerCase().includes(termo)));
 
-  const chamadasFiltradas = (perfil === 'professor' ? historicoChamadas.filter(i => turmasProfessorDemo.ids.includes(i.turmaId)) : historicoChamadas)
-    .filter(i => i.turmaNome.toLowerCase().includes(termo) || i.dataFormatada.toLowerCase().includes(termo));
+  const chamadasFiltradas = useMemo(() => {
+    const dataBuscaLimpa = filtroData.trim();
+    const aulaBuscaLimpa = filtroAula.trim().toLowerCase();
 
-  const boletinsDoPerfil = perfil === 'professor' ? BOLETINS_DEMO.filter(b => turmasProfessorDemo.nomes.includes(b.turma)) : BOLETINS_DEMO;
-  const boletinsFiltrados = boletinsDoPerfil.filter(b =>
-    b.aluno.toLowerCase().includes(termo) || b.turma.toLowerCase().includes(termo) || b.disciplina.toLowerCase().includes(termo)
+    return historicoChamadas.filter(i => {
+      if (dataBuscaLimpa) {
+        const bateBr = String(i.dataBr || '').includes(dataBuscaLimpa);
+        const bateFmt = String(i.dataFormatada || '').toLowerCase().includes(dataBuscaLimpa.toLowerCase());
+        const bateIso = String(i.dataChamadaFormatada || '').includes(dataBuscaLimpa);
+        if (!bateBr && !bateFmt && !bateIso) return false;
+      }
+      if (aulaBuscaLimpa) {
+        const bateAula = String(i.rotuloAula || '').toLowerCase().includes(aulaBuscaLimpa) ||
+          String(i.turmaNome || '').toLowerCase().includes(aulaBuscaLimpa) ||
+          String(i.disciplina || '').toLowerCase().includes(aulaBuscaLimpa);
+        if (!bateAula) return false;
+      }
+      if (!termo) return true;
+      return (
+        i.turmaNome.toLowerCase().includes(termo) ||
+        i.disciplina.toLowerCase().includes(termo) ||
+        i.dataFormatada.toLowerCase().includes(termo) ||
+        i.conteudoMinistrado.toLowerCase().includes(termo)
+      );
+    });
+  }, [historicoChamadas, filtroData, filtroAula, termo]);
+
+  const boletinsFiltrados = useMemo(
+    () => boletinsReais.filter(b => b.aluno.toLowerCase().includes(termo) || b.turma.toLowerCase().includes(termo) || b.disciplina.toLowerCase().includes(termo)),
+    [boletinsReais, termo]
   );
-  const turmasUnicas = Array.from(new Set(boletinsDoPerfil.map(b => b.turma)));
+
+  const turmasUnicas = useMemo(
+    () => Array.from(new Set(boletinsReais.map(b => b.turma))).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    [boletinsReais]
+  );
+
+  const kpisDiario = useMemo(() => {
+    const totalAulas = chamadasFiltradas.length;
+    const totalPres = chamadasFiltradas.reduce((acc, c) => acc + c.presentes + c.justificadas, 0);
+    const totalReg = chamadasFiltradas.reduce((acc, c) => acc + c.presentes + c.faltas + c.justificadas, 0);
+    const freq = totalReg > 0 ? `${Math.round((totalPres / totalReg) * 100)}%` : '—';
+    return { totalAulas, freq };
+  }, [chamadasFiltradas]);
+
   const toggleTurma = (nome: string) => setTurmasExpandidas(prev => (prev.includes(nome) ? prev.filter(t => t !== nome) : [...prev, nome]));
 
   const renderCabecalhoCard = (icone: keyof typeof Ionicons.glyphMap, cor: string, titulo: string, data: string) => (
@@ -186,39 +324,66 @@ export default function HistoricoScreen() {
   );
 
   const renderChamada = ({ item }: { item: any }) => (
-    <TouchableOpacity style={[styles.cardItem, { backgroundColor: tema.inputBackground, borderColor: tema.borda, marginBottom: 12 }]} activeOpacity={0.7} onPress={() => router.push(`/chamada?id=${item.turmaId}`)}>
-      {renderCabecalhoCard('checkmark-circle-outline', '#2E7D32', 'Diário Assinado', item.dataFormatada)}
+    <TouchableOpacity
+      style={[styles.cardItem, { backgroundColor: tema.inputBackground, borderColor: tema.borda, marginBottom: 12 }]}
+      activeOpacity={0.75}
+      onPress={() => setDiarioSelecionado(item)}
+    >
+      {renderCabecalhoCard('checkmark-circle-outline', '#2E7D32', item.rotuloAula, item.dataFormatada)}
       <View style={styles.corpoCard}>
-        <Text style={[styles.textoTurma, { color: tema.textoPrincipal }]}>{item.turmaNome}</Text>
-        <Text style={[styles.textoDetalhe, { color: tema.textoSecundario }]}>Validado com {item.presentes} presentes e {item.faltas} faltas.</Text>
+        {!!item.conteudoMinistrado && (
+          <Text style={[styles.textoDetalhe, { color: tema.textoPrincipal, marginBottom: 6 }]} numberOfLines={2}>
+            Conteúdo: {item.conteudoMinistrado}
+          </Text>
+        )}
+        <View style={styles.rowPillsChamada}>
+          <View style={[styles.pillMini, { backgroundColor: '#2E7D3220' }]}>
+            <Text style={{ color: '#2E7D32', fontSize: 11, fontWeight: '700' }}>{item.presentes} P</Text>
+          </View>
+          <View style={[styles.pillMini, { backgroundColor: '#C6282820' }]}>
+            <Text style={{ color: '#C62828', fontSize: 11, fontWeight: '700' }}>{item.faltas} F</Text>
+          </View>
+          {item.justificadas > 0 && (
+            <View style={[styles.pillMini, { backgroundColor: '#EF6C0020' }]}>
+              <Text style={{ color: '#EF6C00', fontSize: 11, fontWeight: '700' }}>{item.justificadas} J</Text>
+            </View>
+          )}
+          <View style={{ flex: 1 }} />
+          <Text style={{ color: tema.botaoPrimario, fontSize: 11, fontWeight: '700' }}>Ver chamada {'>'}</Text>
+        </View>
       </View>
     </TouchableOpacity>
   );
 
   const renderBoletim = (item: any, isFlat = true) => {
-    const notasValidas = Object.values(item.notas).filter(n => n !== null) as number[];
-    const media = notasValidas.length > 0 ? (notasValidas.reduce((a, b) => a + b, 0) / notasValidas.length).toFixed(1) : '-';
-    const isAprovado = media !== '-' && parseFloat(media) >= 7.0;
-    const isRecuperacao = media !== '-' && parseFloat(media) < 7.0;
+    const somaNotas = item.avaliacoes.reduce((acc: number, a: any) => acc + a.nota, 0);
+    const somaMax = item.avaliacoes.reduce((acc: number, a: any) => acc + a.max, 0);
+    const percentual = somaMax > 0 ? (somaNotas / somaMax) * 100 : 0;
+    const isAprovado = percentual >= 60;
+
     return (
-      <View key={item.id} style={[styles.cardItem, { backgroundColor: tema.inputBackground, borderColor: tema.borda, marginBottom: isFlat ? 15 : 10 }]}>
+      <View key={item.id} style={[styles.cardItem, { backgroundColor: tema.inputBackground, borderColor: tema.borda, marginBottom: isFlat ? 14 : 10 }]}>
         <View style={styles.linhaCabecalho}>
           <View style={styles.linhaTitulo}>
-            <View style={[styles.iconePessoa, { backgroundColor: tema.botaoPrimario + '20' }]}><Ionicons name="person" size={16} color={tema.botaoPrimario} /></View>
+            <View style={[styles.iconePessoa, { backgroundColor: tema.botaoPrimario + '20' }]}>
+              <Text style={{ color: tema.botaoPrimario, fontSize: 11, fontWeight: '800' }}>{obterIniciais(item.aluno)}</Text>
+            </View>
             <View>
               <Text style={[styles.tituloAtividade, { color: tema.textoPrincipal }]}>{item.aluno}</Text>
               <Text style={[styles.textoDetalhe, { color: tema.textoSecundario, fontSize: 11 }]}>{item.turma} • {item.disciplina}</Text>
             </View>
           </View>
-          <View style={[styles.badgeMedia, { backgroundColor: isAprovado ? '#E8F5E9' : isRecuperacao ? '#FFEBEE' : tema.borda }]}>
-            <Text style={[styles.textoMedia, { color: isAprovado ? '#2E7D32' : isRecuperacao ? '#C62828' : tema.textoSecundario }]}>Média: {media}</Text>
+          <View style={[styles.badgeMedia, { backgroundColor: isAprovado ? '#2E7D3220' : '#C6282820' }]}>
+            <Text style={[styles.textoMedia, { color: isAprovado ? '#2E7D32' : '#C62828' }]}>
+              {somaNotas.toFixed(1)} / {somaMax.toFixed(1)}
+            </Text>
           </View>
         </View>
         <View style={[styles.gradeNotas, { borderTopColor: tema.borda }]}>
-          {[1, 2, 3, 4].map(un => (
-            <View key={un} style={styles.colunaNota}>
-              <Text style={[styles.labelUnidade, { color: tema.textoSecundario }]}>Un {un}</Text>
-              <Text style={[styles.valorNota, { color: item.notas[`un${un}`] ? tema.textoPrincipal : tema.textoSecundario }]}>{item.notas[`un${un}`] ? item.notas[`un${un}`].toFixed(1) : '-'}</Text>
+          {item.avaliacoes.map((av: any, idx: number) => (
+            <View key={`${av.titulo}_${idx}`} style={styles.colunaNota}>
+              <Text style={[styles.labelUnidade, { color: tema.textoSecundario }]} numberOfLines={1}>{av.titulo}</Text>
+              <Text style={[styles.valorNota, { color: tema.textoPrincipal }]}>{av.nota.toFixed(1)}</Text>
             </View>
           ))}
         </View>
@@ -229,7 +394,7 @@ export default function HistoricoScreen() {
   const renderPasta = ({ item }: { item: any }) => {
     if (isBuscando) return renderBoletim(item, true);
     const isExpanded = turmasExpandidas.includes(item);
-    const alunosDaTurma = boletinsDoPerfil.filter(b => b.turma === item);
+    const alunosDaTurma = boletinsReais.filter(b => b.turma === item);
     return (
       <View style={{ marginBottom: 14 }}>
         <TouchableOpacity style={[styles.cardPasta, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]} activeOpacity={0.7} onPress={() => toggleTurma(item)}>
@@ -265,18 +430,16 @@ export default function HistoricoScreen() {
           <View style={{ flex: 1 }}>
             <Text style={[styles.tituloHeader, { color: tema.textoLogo }]}>{isAdmin ? 'Central de Auditoria' : 'Central de Consultas'}</Text>
             <Text style={[styles.subtituloHeader, { color: tema.textoLogo }]}>
-              {isAdmin ? 'Logs administrativos e histórico de chamados encerrados' : perfil === 'coordenador' ? 'Acompanhamento pedagógico de frequência e desempenho' : 'Diários e notas das turmas atribuídas'}
+              {isAdmin ? 'Logs administrativos e histórico de chamados encerrados' : perfil === 'coordenador' ? 'Acompanhamento pedagógico de frequência e desempenho' : 'Consulte chamadas anteriores e notas das suas turmas'}
             </Text>
           </View>
         </View>
 
-        <View style={styles.badgeDemonstracao}><Text style={styles.textoBadgeDemonstracao}>Modo demonstração</Text></View>
-
         <View style={styles.tabContainer}>
-          <TouchableOpacity style={[styles.tabButton, abaPrimaria && { backgroundColor: 'rgba(255,255,255,0.22)' }]} onPress={() => { setAbaAtiva(isAdmin ? 'auditoria' : 'frequencia'); setBusca(''); }}>
+          <TouchableOpacity style={[styles.tabButton, abaPrimaria && { backgroundColor: 'rgba(255,255,255,0.22)' }]} onPress={() => { setAbaAtiva(isAdmin ? 'auditoria' : 'frequencia'); setBusca(''); setDropdownAulaAberto(false); }}>
             <Text style={[styles.tabText, { color: tema.textoLogo, opacity: abaPrimaria ? 1 : 0.65 }]}>{isAdmin ? 'Log de Auditoria' : 'Diários de Classe'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.tabButton, !abaPrimaria && { backgroundColor: 'rgba(255,255,255,0.22)' }]} onPress={() => { setAbaAtiva(isAdmin ? 'chamados' : 'notas'); setBusca(''); }}>
+          <TouchableOpacity style={[styles.tabButton, !abaPrimaria && { backgroundColor: 'rgba(255,255,255,0.22)' }]} onPress={() => { setAbaAtiva(isAdmin ? 'chamados' : 'notas'); setBusca(''); setDropdownAulaAberto(false); }}>
             <Text style={[styles.tabText, { color: tema.textoLogo, opacity: !abaPrimaria ? 1 : 0.65 }]}>{isAdmin ? 'Chamados Encerrados' : 'Alunos e Notas'}</Text>
           </TouchableOpacity>
         </View>
@@ -285,12 +448,71 @@ export default function HistoricoScreen() {
           <Ionicons name="search" size={20} color={tema.textoSecundario} style={styles.searchIcon} />
           <TextInput
             style={[styles.searchInput, { color: tema.textoPrincipal }]}
-            placeholder={isAdmin ? (abaAtiva === 'auditoria' ? 'Pesquisar por ação ou responsável...' : 'Pesquisar por chamado ou responsável...') : (abaAtiva === 'frequencia' ? 'Pesquisar por turma ou data...' : 'Pesquisar por nome, turma ou matéria...')}
+            placeholder={isAdmin ? (abaAtiva === 'auditoria' ? 'Pesquisar por ação ou responsável...' : 'Pesquisar por chamado ou responsável...') : (abaAtiva === 'frequencia' ? 'Pesquisar por aluno, conteúdo ou turma...' : 'Pesquisar por aluno, turma ou matéria...')}
             placeholderTextColor={tema.textoSecundario}
             value={busca}
             onChangeText={setBusca}
           />
         </View>
+
+        {!isAdmin && abaAtiva === 'frequencia' && (
+          <View style={{ marginTop: 10 }}>
+            <View style={styles.rowFiltroPrensado}>
+              <View style={[styles.filtroDataBox, { backgroundColor: tema.inputBackground, borderColor: filtroData ? tema.botaoPrimario : tema.borda }]}>
+                <Ionicons name="calendar-outline" size={16} color={tema.botaoPrimario} />
+                <TextInput
+                  style={[styles.inputFiltroCurto, { color: tema.textoPrincipal }]}
+                  placeholder="Data (DD/MM/AAAA)"
+                  placeholderTextColor={tema.textoSecundario}
+                  keyboardType="numeric"
+                  maxLength={10}
+                  value={filtroData}
+                  onChangeText={v => setFiltroData(formatarInputDataFiltro(v))}
+                />
+                {!!filtroData && (
+                  <TouchableOpacity onPress={() => setFiltroData('')}>
+                    <Ionicons name="close-circle" size={16} color={tema.textoSecundario} />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <TouchableOpacity
+                style={[styles.filtroAulaBox, { backgroundColor: tema.inputBackground, borderColor: filtroAula || dropdownAulaAberto ? tema.botaoPrimario : tema.borda }]}
+                onPress={() => setDropdownAulaAberto(!dropdownAulaAberto)}
+              >
+                <Ionicons name="school-outline" size={16} color={tema.botaoPrimario} />
+                <Text style={{ color: filtroAula ? tema.textoPrincipal : tema.textoSecundario, fontSize: 12, fontWeight: filtroAula ? '600' : '400', flex: 1 }} numberOfLines={1}>
+                  {filtroAula || 'Aula / Turma'}
+                </Text>
+                <Ionicons name={dropdownAulaAberto ? 'chevron-up' : 'chevron-down'} size={16} color={tema.textoSecundario} />
+              </TouchableOpacity>
+            </View>
+
+            {dropdownAulaAberto && (
+              <View style={[styles.dropdownAulaLista, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                <TouchableOpacity
+                  style={[styles.dropdownAulaItem, { borderBottomColor: tema.borda }]}
+                  onPress={() => { setFiltroAula(''); setDropdownAulaAberto(false); }}
+                >
+                  <Text style={{ color: !filtroAula ? tema.botaoPrimario : tema.textoPrincipal, fontSize: 12, fontWeight: !filtroAula ? '700' : '500' }}>
+                    Todas as aulas / turmas
+                  </Text>
+                </TouchableOpacity>
+                {opcoesAula.map(aula => (
+                  <TouchableOpacity
+                    key={aula}
+                    style={[styles.dropdownAulaItem, { borderBottomColor: tema.borda }]}
+                    onPress={() => { setFiltroAula(aula); setDropdownAulaAberto(false); }}
+                  >
+                    <Text style={{ color: filtroAula === aula ? tema.botaoPrimario : tema.textoPrincipal, fontSize: 12, fontWeight: filtroAula === aula ? '700' : '500' }}>
+                      {aula}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
       </View>
 
       {carregando ? (
@@ -301,19 +523,108 @@ export default function HistoricoScreen() {
       ) : (
         <FlatList
           data={listaAtual}
-          keyExtractor={(item, index) => item.id || index.toString()}
+          keyExtractor={(item, index) => item.id || String(item) || index.toString()}
           renderItem={renderAtual}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDados()} tintColor={tema.botaoPrimario} />}
+          ListHeaderComponent={
+            !isAdmin && abaAtiva === 'frequencia' ? (
+              <View style={styles.resumoRow}>
+                <View style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                  <Ionicons name="book-outline" size={18} color={tema.botaoPrimario} />
+                  <Text style={[styles.valorResumo, { color: tema.textoPrincipal }]}>{kpisDiario.totalAulas}</Text>
+                  <Text style={[styles.labelResumo, { color: tema.textoSecundario }]}>Diários Assinados</Text>
+                </View>
+                <View style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                  <Ionicons name="stats-chart-outline" size={18} color="#2E7D32" />
+                  <Text style={[styles.valorResumo, { color: tema.textoPrincipal }]}>{kpisDiario.freq}</Text>
+                  <Text style={[styles.labelResumo, { color: tema.textoSecundario }]}>Frequência Média</Text>
+                </View>
+              </View>
+            ) : undefined
+          }
           ListEmptyComponent={
             <View style={{ alignItems: 'center', marginTop: 40 }}>
-              <Ionicons name="search-outline" size={50} color={tema.borda} />
-              <Text style={{ textAlign: 'center', marginTop: 15, color: tema.textoSecundario, fontSize: 16 }}>{busca.trim() ? 'Nenhum resultado encontrado para a pesquisa.' : 'Nenhum registro disponível.'}</Text>
+              <Ionicons name="search-outline" size={44} color={tema.textoSecundario} />
+              <Text style={{ textAlign: 'center', marginTop: 12, color: tema.textoPrincipal, fontWeight: '700', fontSize: 15 }}>
+                {isBuscando ? 'Nenhum resultado encontrado' : 'Nenhum registro disponível'}
+              </Text>
+              <Text style={{ textAlign: 'center', marginTop: 4, color: tema.textoSecundario, fontSize: 12 }}>
+                {abaAtiva === 'frequencia' ? 'As chamadas assinadas aparecerão aqui para consulta.' : 'As notas lançadas aparecerão organizadas por turma.'}
+              </Text>
             </View>
           }
         />
       )}
+
+      {/* MODAL: CONSULTA DETALHADA DO DIÁRIO DE CLASSE */}
+      <Modal visible={diarioSelecionado !== null} transparent animationType="slide" onRequestClose={() => setDiarioSelecionado(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>
+                  {diarioSelecionado?.rotuloAula || diarioSelecionado?.turmaNome}
+                </Text>
+                <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 2 }}>
+                  {diarioSelecionado?.dataFormatada}{diarioSelecionado?.horario ? ` • ${diarioSelecionado.horario}` : ''}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setDiarioSelecionado(null)}>
+                <Ionicons name="close" size={24} color={tema.textoSecundario} />
+              </TouchableOpacity>
+            </View>
+
+            {diarioSelecionado && (
+              <ScrollView contentContainerStyle={{ padding: 20 }}>
+                <View style={styles.resumoRow}>
+                  <View style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                    <Text style={{ color: '#2E7D32', fontSize: 18, fontWeight: 'bold' }}>{diarioSelecionado.presentes}</Text>
+                    <Text style={{ color: tema.textoSecundario, fontSize: 11 }}>Presentes</Text>
+                  </View>
+                  <View style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                    <Text style={{ color: '#C62828', fontSize: 18, fontWeight: 'bold' }}>{diarioSelecionado.faltas}</Text>
+                    <Text style={{ color: tema.textoSecundario, fontSize: 11 }}>Faltas</Text>
+                  </View>
+                  <View style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                    <Text style={{ color: '#EF6C00', fontSize: 18, fontWeight: 'bold' }}>{diarioSelecionado.justificadas}</Text>
+                    <Text style={{ color: tema.textoSecundario, fontSize: 11 }}>Justificadas</Text>
+                  </View>
+                </View>
+
+                {!!diarioSelecionado.conteudoMinistrado && (
+                  <View style={[styles.boxConteudoModal, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                    <Text style={{ color: tema.textoSecundario, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>CONTEÚDO MINISTRADO</Text>
+                    <Text style={{ color: tema.textoPrincipal, fontSize: 13, lineHeight: 19 }}>{diarioSelecionado.conteudoMinistrado}</Text>
+                  </View>
+                )}
+
+                <Text style={{ color: tema.textoSecundario, fontSize: 12, fontWeight: '700', marginBottom: 10 }}>
+                  Lista de Frequência ({diarioSelecionado.alunos?.length || 0} aluno(s))
+                </Text>
+
+                {(diarioSelecionado.alunos || []).map((a: any, idx: number) => {
+                  const st = a.status || (Array.isArray(a.presencas) && a.presencas.some((p: boolean) => !p) ? 'falta' : 'presente');
+                  const cor = st === 'falta' ? '#C62828' : st === 'justificada' ? '#EF6C00' : '#2E7D32';
+                  const label = st === 'falta' ? 'Falta' : st === 'justificada' ? 'Justificada' : 'Presente';
+                  return (
+                    <View key={a.id || idx} style={[styles.linhaAlunoModal, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: tema.textoPrincipal, fontSize: 14, fontWeight: '600' }}>{a.nome}</Text>
+                        {!!a.obs && <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 2, fontStyle: 'italic' }}>Obs: {a.obs}</Text>}
+                      </View>
+                      <View style={[styles.pillMini, { backgroundColor: cor + '20' }]}>
+                        <Text style={{ color: cor, fontSize: 11, fontWeight: '800' }}>{label}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -323,34 +634,49 @@ const styles = StyleSheet.create({
   header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 20, elevation: 5, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
   topoCabecalho: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   btnVoltar: { paddingTop: 3, paddingRight: 4 },
-  tituloHeader: { fontSize: 24, fontWeight: 'bold' },
-  subtituloHeader: { fontSize: 13, opacity: 0.85, marginBottom: 15, marginTop: 2 },
-  badgeDemonstracao: { alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 15, backgroundColor: 'rgba(255,255,255,0.16)' },
-  textoBadgeDemonstracao: { color: '#FFF', fontSize: 11, fontWeight: '600' },
-  tabContainer: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 4, marginBottom: 15 },
-  tabButton: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
+  tituloHeader: { fontSize: 22, fontWeight: 'bold' },
+  subtituloHeader: { fontSize: 12, opacity: 0.85, marginBottom: 14, marginTop: 2 },
+  tabContainer: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 4, marginBottom: 14 },
+  tabButton: { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 8 },
   tabText: { fontSize: 13, fontWeight: 'bold' },
-  searchContainer: { flexDirection: 'row', alignItems: 'center', height: 45, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10 },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', height: 44, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10 },
   searchIcon: { marginRight: 8 }, searchInput: { flex: 1, height: '100%', fontSize: 14 },
+  rowFiltroPrensado: { flexDirection: 'row', gap: 8 },
+  filtroDataBox: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, height: 38, borderRadius: 8, borderWidth: 1, paddingHorizontal: 10 },
+  inputFiltroCurto: { flex: 1, height: '100%', fontSize: 12 },
+  filtroAulaBox: { flex: 1.15, flexDirection: 'row', alignItems: 'center', gap: 6, height: 38, borderRadius: 8, borderWidth: 1, paddingHorizontal: 10 },
+  dropdownAulaLista: { borderWidth: 1, borderRadius: 10, marginTop: 6, overflow: 'hidden' },
+  dropdownAulaItem: { paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
   listContent: { padding: 20, paddingBottom: 40 },
+  resumoRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  cardResumo: { flex: 1, borderWidth: 1, borderRadius: 12, padding: 12, alignItems: 'center' },
+  valorResumo: { fontSize: 20, fontWeight: 'bold', marginTop: 4 },
+  labelResumo: { fontSize: 11, marginTop: 2, textAlign: 'center' },
   cardItem: { borderWidth: 1, borderRadius: 12, padding: 15, overflow: 'hidden' },
   linhaCabecalho: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   linhaTitulo: { flexDirection: 'row', alignItems: 'center' },
   tituloAtividade: { fontSize: 15, fontWeight: 'bold' },
   textoData: { fontSize: 11, fontStyle: 'italic', marginTop: 3 },
   corpoCard: { paddingLeft: 26 },
-  textoTurma: { fontSize: 13, fontWeight: '700', marginBottom: 4 },
   textoDetalhe: { fontSize: 13, lineHeight: 18 },
+  rowPillsChamada: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  pillMini: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   rodapeChamado: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 26, marginTop: 4, gap: 10 },
   pillEncerrado: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   iconePessoa: { width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   badgeMedia: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   textoMedia: { fontSize: 12, fontWeight: 'bold' },
-  gradeNotas: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 12, marginTop: 5, borderTopWidth: 1 },
-  colunaNota: { alignItems: 'center', flex: 1 },
+  gradeNotas: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingTop: 12, marginTop: 8, borderTopWidth: 1 },
+  colunaNota: { alignItems: 'center', minWidth: 64 },
   labelUnidade: { fontSize: 11, marginBottom: 4 },
   valorNota: { fontSize: 14, fontWeight: 'bold' },
   cardPasta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderRadius: 12, padding: 15 },
   tituloPasta: { fontSize: 16, fontWeight: 'bold' },
   conteudoPasta: { paddingLeft: 15, paddingTop: 10, borderLeftWidth: 2, marginLeft: 15, marginTop: 5 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  modalConteudo: { maxHeight: '85%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, paddingBottom: 24 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1 },
+  modalTitulo: { fontSize: 17, fontWeight: 'bold' },
+  boxConteudoModal: { borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 16 },
+  linhaAlunoModal: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 8, gap: 10 },
 });

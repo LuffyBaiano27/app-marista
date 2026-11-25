@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Modal, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { collection, getDoc, getDocs, addDoc, setDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { useDemoProfile, type ModoTema } from '../../contexts/demoProfileContext';
 import { db } from '../../config/firebase';
 import { FeedbackToast, type EstadoFeedback, type TipoFeedback } from '../../components/FeedbackToast';
@@ -10,7 +10,7 @@ import { FeedbackToast, type EstadoFeedback, type TipoFeedback } from '../../com
 type EtapaStatus = 'pendente' | 'rodando' | 'ok' | 'erro';
 type TamanhoFonte = 'Pequena' | 'Média' | 'Grande';
 interface EtapaIntegridade { id: string; titulo: string; detalhe: string; status: EtapaStatus; erro?: string; }
-interface EventoCalendario { id: string; titulo: string; tipo: 'Férias' | 'Pausa / Recesso' | 'Feriado'; periodo: string; setor: 'Coordenação' | 'Infra'; }
+interface EventoCalendario { id: string; titulo: string; tipo: 'Férias' | 'Pausa / Recesso' | 'Feriado'; periodo: string; setor: 'Coordenação' | 'Infra'; pendenteAviso?: boolean; }
 interface SessaoAtiva { id: string; dispositivo: string; local: string; horario: string; atual?: boolean; }
 
 const NOMES_PERFIS = { admin: 'Administrador', coordenador: 'Coordenador', professor: 'Professor' };
@@ -43,7 +43,6 @@ export default function PerfilScreen() {
   const { perfil, setPerfil, modoTema, setModoTema, temaAtivo: tema } = useDemoProfile();
 
   const usuario = { ...IDENTIDADES_DEMO[perfil], cargo: NOMES_PERFIS[perfil] };
-  const nomeSolicitanteChamado = 'Luffy Baiano';
 
   const [modalDados, setModalDados] = useState(false);
   const [modalPrivacidade, setModalPrivacidade] = useState(false);
@@ -66,6 +65,7 @@ export default function PerfilScreen() {
   const [textoChamado, setTextoChamado] = useState('');
   const [tituloAviso, setTituloAviso] = useState('');
   const [mensagemAviso, setMensagemAviso] = useState('');
+  const [publicandoAviso, setPublicandoAviso] = useState(false);
 
   const [abaInstituicao, setAbaInstituicao] = useState<'calendario' | 'infra'>('calendario');
   const [anoLetivo, setAnoLetivo] = useState('2026');
@@ -94,6 +94,27 @@ export default function PerfilScreen() {
   }, []);
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
   const voltar = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
+
+  const carregarConfigInstituicao = useCallback(async () => {
+    try {
+      const snap = await getDoc(doc(db, 'instituicao', 'config'));
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d.anoLetivo) setAnoLetivo(String(d.anoLetivo));
+        if (d.toleranciaChamadaMin !== undefined) setToleranciaChamadaMin(String(d.toleranciaChamadaMin));
+        if (typeof d.modoManutencao === 'boolean') setModoManutencao(d.modoManutencao);
+        if (Array.isArray(d.calendarioEventos)) setEventos(d.calendarioEventos);
+      }
+    } catch {
+      // mantém valores padrão caso ainda não exista o documento ou regra
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void carregarConfigInstituicao();
+    }, [carregarConfigInstituicao])
+  );
 
   const handleLogout = () => {
     if (Platform.OS === 'web') {
@@ -145,9 +166,13 @@ export default function PerfilScreen() {
     try {
       const agora = new Date();
       await addDoc(collection(db, 'chamados_suporte'), {
-        solicitante: `${nomeSolicitanteChamado} (${usuario.cargo})`, data: agora.toLocaleDateString('pt-BR'),
+        solicitante: `${usuario.nome} (${usuario.cargo})`,
+        data: agora.toLocaleDateString('pt-BR'),
         hora: agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        descricao: textoChamado.trim(), status: 'pendente', timestamp: agora.getTime(), criadoEm: serverTimestamp(),
+        descricao: textoChamado.trim(),
+        status: 'pendente',
+        timestamp: agora.getTime(),
+        criadoEm: serverTimestamp(),
       });
       setModalAjuda(false); setTextoChamado('');
       notificar('sucesso', 'Chamado enviado', 'Ticket encaminhado para a equipe de TI.');
@@ -156,24 +181,86 @@ export default function PerfilScreen() {
     }
   };
 
+  const handlePublicarAviso = async () => {
+    if (!tituloAviso.trim() || !mensagemAviso.trim()) {
+      return notificar('aviso', 'Campos obrigatórios', 'Informe o título e a mensagem do comunicado.');
+    }
+    setPublicandoAviso(true);
+    try {
+      await addDoc(collection(db, 'comunicados'), {
+        titulo: tituloAviso.trim(),
+        mensagem: mensagemAviso.trim(),
+        destinatario: 'Todos',
+        autor: `${usuario.nome} (${usuario.cargo})`,
+        criadoEm: serverTimestamp(),
+      });
+      setTituloAviso('');
+      setMensagemAviso('');
+      setModalAviso(false);
+      notificar('sucesso', 'Aviso publicado!', 'Comunicado gravado e enviado ao mural geral.');
+    } catch (error: any) {
+      notificar('erro', 'Erro ao publicar', error?.message || 'Não foi possível salvar o comunicado.');
+    } finally { setPublicandoAviso(false); }
+  };
+
   const handleAdicionarEvento = () => {
     if (!novoEvento.titulo.trim() || !novoEvento.periodo.trim()) {
       return notificar('aviso', 'Campos obrigatórios', 'Informe o título e o período/data.');
     }
-    setEventos(prev => [{ id: `ev_${Date.now()}`, titulo: novoEvento.titulo.trim(), tipo: novoEvento.tipo, periodo: novoEvento.periodo.trim(), setor: perfil === 'coordenador' ? 'Coordenação' : 'Infra' }, ...prev]);
+    setEventos(prev => [
+      {
+        id: `ev_${Date.now()}`,
+        titulo: novoEvento.titulo.trim(),
+        tipo: novoEvento.tipo,
+        periodo: novoEvento.periodo.trim(),
+        setor: perfil === 'coordenador' ? 'Coordenação' : 'Infra',
+        pendenteAviso: true,
+      },
+      ...prev,
+    ]);
     setNovoEvento({ titulo: '', tipo: 'Pausa / Recesso', periodo: '' });
-    notificar('sucesso', 'Evento adicionado', 'Item incluído no cronograma.');
+    notificar('sucesso', 'Evento adicionado', 'Clique em "Salvar Configurações" para gravar e avisar a todos.');
   };
 
   const handleSalvarInstituicao = async () => {
     setSalvandoInst(true);
     try {
+      const novosParaAvisar = eventos.filter(ev => ev.pendenteAviso);
+      const eventosLimpos = eventos.map(({ pendenteAviso, ...resto }) => resto);
+
       await setDoc(doc(db, 'instituicao', 'config'), {
-        anoLetivo: anoLetivo.trim() || '2026', toleranciaChamadaMin: Number(toleranciaChamadaMin) || 15,
-        modoManutencao, calendarioEventos: eventos, atualizadoPor: `${usuario.nome} (${usuario.cargo})`, atualizadoEm: serverTimestamp(),
+        anoLetivo: anoLetivo.trim() || '2026',
+        toleranciaChamadaMin: Number(toleranciaChamadaMin) || 15,
+        modoManutencao,
+        calendarioEventos: eventosLimpos,
+        atualizadoPor: `${usuario.nome} (${usuario.cargo})`,
+        atualizadoEm: serverTimestamp(),
       }, { merge: true });
+
+      if (novosParaAvisar.length > 0) {
+        await Promise.all(
+          novosParaAvisar.map(ev =>
+            addDoc(collection(db, 'comunicados'), {
+              titulo: `Calendário: ${ev.titulo}`,
+              mensagem: `Aviso de ${ev.tipo}: não haverá expediente no período de ${ev.periodo}.`,
+              destinatario: 'Todos',
+              tipo: 'calendario',
+              autor: `${usuario.nome} (${usuario.cargo})`,
+              criadoEm: serverTimestamp(),
+            })
+          )
+        );
+      }
+
+      setEventos(eventosLimpos);
       setModalInstituicao(false);
-      notificar('sucesso', 'Dados salvos', 'Calendário acadêmico e parâmetros sincronizados.');
+      notificar(
+        'sucesso',
+        'Dados salvos',
+        novosParaAvisar.length > 0
+          ? 'Calendário sincronizado e aviso de pausa enviado para todos!'
+          : 'Calendário acadêmico e parâmetros sincronizados.'
+      );
     } catch (error: any) {
       notificar('erro', 'Erro ao salvar', error?.message || 'Falha ao gravar configurações.');
     } finally { setSalvandoInst(false); }
@@ -539,23 +626,27 @@ export default function PerfilScreen() {
         <View style={styles.modalOverlayFull}>
           <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
-              <Text style={[styles.modalTitle, { color: tema.textoPrincipal, fontSize: tamFonte(18) }]}>Dados da Instituição</Text>
+              <Text style={[styles.modalTitle, { color: tema.textoPrincipal, fontSize: tamFonte(18) }]}>
+                {perfil === 'coordenador' ? 'Calendário e Pausas' : 'Dados da Instituição'}
+              </Text>
               <TouchableOpacity onPress={() => setModalInstituicao(false)} style={styles.btnFecharModal}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
-                {(['calendario', 'infra'] as const).map(aba => {
-                  const ativo = abaInstituicao === aba;
-                  return (
-                    <TouchableOpacity key={aba} onPress={() => setAbaInstituicao(aba)} style={[styles.chipAba, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: tema.borda }]}>
-                      <Text style={{ color: ativo ? '#FFF' : tema.textoPrincipal, fontWeight: '700', fontSize: tamFonte(12) }}>
-                        {aba === 'calendario' ? 'Cronograma / Pausas (Coord.)' : 'Parâmetros Técnicos (Infra)'}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              {abaInstituicao === 'calendario' ? (
+              {perfil === 'admin' && (
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
+                  {(['calendario', 'infra'] as const).map(aba => {
+                    const ativo = abaInstituicao === aba;
+                    return (
+                      <TouchableOpacity key={aba} onPress={() => setAbaInstituicao(aba)} style={[styles.chipAba, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: tema.borda }]}>
+                        <Text style={{ color: ativo ? '#FFF' : tema.textoPrincipal, fontWeight: '700', fontSize: tamFonte(12) }}>
+                          {aba === 'calendario' ? 'Cronograma / Pausas (Coord.)' : 'Parâmetros Técnicos (Infra)'}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              {abaInstituicao === 'calendario' || perfil === 'coordenador' ? (
                 <>
                   <Text style={[styles.inputLabel, { color: tema.textoPrincipal, fontSize: tamFonte(14) }]}>Nova Pausa, Férias ou Feriado</Text>
                   <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14), marginBottom: 10 }]} placeholder="Ex: Recesso Escolar / Férias de Julho" placeholderTextColor={tema.textoSecundario} value={novoEvento.titulo} onChangeText={v => setNovoEvento(p => ({ ...p, titulo: v }))} />
@@ -565,10 +656,12 @@ export default function PerfilScreen() {
                     <Text style={{ color: tema.botaoPrimario, fontWeight: '700', fontSize: tamFonte(13) }}>Adicionar ao Cronograma</Text>
                   </TouchableOpacity>
                   {eventos.map(ev => (
-                    <View key={ev.id} style={[styles.cardSessao, { borderColor: tema.borda, backgroundColor: tema.inputBackground, marginTop: 10, justifyContent: 'space-between' }]}>
+                    <View key={ev.id} style={[styles.cardSessao, { borderColor: ev.pendenteAviso ? tema.botaoPrimario : tema.borda, backgroundColor: tema.inputBackground, marginTop: 10, justifyContent: 'space-between' }]}>
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.tituloLinha, { color: tema.textoPrincipal, fontSize: tamFonte(15) }]}>{ev.titulo}</Text>
-                        <Text style={[styles.subtituloLinha, { color: tema.textoSecundario, fontSize: tamFonte(12) }]}>{ev.periodo} • {ev.setor}</Text>
+                        <Text style={[styles.subtituloLinha, { color: tema.textoSecundario, fontSize: tamFonte(12) }]}>
+                          {ev.periodo} • {ev.setor}{ev.pendenteAviso ? ' • Novo (avisará todos)' : ''}
+                        </Text>
                       </View>
                       <TouchableOpacity onPress={() => setEventos(prev => prev.filter(x => x.id !== ev.id))}><Ionicons name="trash-outline" size={18} color="#C62828" /></TouchableOpacity>
                     </View>
@@ -729,8 +822,8 @@ export default function PerfilScreen() {
             <View style={styles.modalBody}>
               <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14) }]} value={tituloAviso} onChangeText={setTituloAviso} placeholder="Título" placeholderTextColor={tema.textoSecundario} />
               <TextInput style={[styles.inputArea, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14), marginTop: 15 }]} multiline value={mensagemAviso} onChangeText={setMensagemAviso} placeholder="Mensagem" placeholderTextColor={tema.textoSecundario} />
-              <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: '#E65100' }]} onPress={() => { notificar('sucesso', 'Aviso publicado', 'Comunicado enviado ao mural.'); setModalAviso(false); }}>
-                <Text style={[styles.textoBtnLargo, { fontSize: tamFonte(15) }]}>Publicar Aviso</Text>
+              <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: '#E65100' }]} onPress={() => void handlePublicarAviso()} disabled={publicandoAviso}>
+                <Text style={[styles.textoBtnLargo, { fontSize: tamFonte(15) }]}>{publicandoAviso ? 'Publicando...' : 'Publicar Aviso'}</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>

@@ -1,209 +1,258 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, Text, StyleSheet, FlatList, TouchableOpacity, useColorScheme, TextInput, KeyboardAvoidingView, Platform, Modal, Alert, ActivityIndicator
-} from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { cores } from '../constants/colors';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-
-// FIREBASE
-import { doc, getDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
+import { useDemoProfile } from '../contexts/demoProfileContext';
 import { db } from '../config/firebase';
+import { FeedbackToast, type EstadoFeedback, type TipoFeedback } from '../components/FeedbackToast';
+
+type StatusPresenca = 'presente' | 'falta' | 'justificada';
+
+interface AlunoChamada {
+  id: string;
+  nome: string;
+  matricula?: string;
+  status: StatusPresenca;
+  obs: string;
+  mostrarObs: boolean;
+}
+
+const obterIniciais = (nome: string) => {
+  const partes = nome.trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return 'AL';
+  if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
+  return `${partes[0][0]}${partes[partes.length - 1][0]}`.toUpperCase();
+};
+
+const getDataDeHoje = () => new Date().toISOString().split('T')[0];
 
 export default function ChamadaScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams(); 
-  const isDarkMode = useColorScheme() === 'dark';
-  const tema = isDarkMode ? cores.dark : cores.light;
+  const { id } = useLocalSearchParams();
+  const aulaId = String(id || '');
+  const { perfil, temaAtivo: tema } = useDemoProfile();
+  const isAdmin = perfil === 'admin';
 
-  // ESTADOS FIREBASE DA TURMA E DA CHAMADA
-  const [turma, setTurma] = useState<any>(null);
-  const [carregandoDados, setCarregandoDados] = useState(true);
-  const [chamadaIdRealizada, setChamadaIdRealizada] = useState<string | null>(null);
+  const [aulaInfo, setAulaInfo] = useState<any>(null);
+  const [alunos, setAlunos] = useState<AlunoChamada[]>([]);
+  const [conteudoMinistrado, setConteudoMinistrado] = useState('');
+  const [busca, setBusca] = useState('');
+  const [carregando, setCarregando] = useState(true);
+  const [salvando, setSalvando] = useState(false);
 
-  // MOCKS DA AULA 
-  const isAulaDupla = true; 
-  const isAdmin = false; 
-  const horario1 = turma?.horario || "Carregando...";
-  const horario2 = "08:40 às 09:30"; 
-  
   const [chamadaConcluida, setChamadaConcluida] = useState(false);
+  const [horaAssinatura, setHoraAssinatura] = useState('');
   const [modalAssinatura, setModalAssinatura] = useState(false);
   const [senhaConfirmacao, setSenhaConfirmacao] = useState('');
+  const [feedback, setFeedback] = useState<EstadoFeedback>({ visivel: false, tipo: 'sucesso', titulo: '', mensagem: '' });
 
-  // ESTADO DA LISTA DE ALUNOS (Inicialmente mockado, mas será sobrescrito se houver chamada no banco)
-  const [alunos, setAlunos] = useState([
-    { id: '1', nome: 'Ana Carolina', presencas: [true, true], obs: '', mostrarObs: false },
-    { id: '2', nome: 'Carlos Eduardo', presencas: [true, true], obs: '', mostrarObs: false },
-    { id: '3', nome: 'Mariana Silva', presencas: [true, true], obs: '', mostrarObs: false },
-    { id: '4', nome: 'João Pedro', presencas: [true, true], obs: '', mostrarObs: false },
-  ]);
+  const notificar = useCallback((tipo: TipoFeedback, titulo: string, mensagem: string) => {
+    setFeedback({ visivel: true, tipo, titulo, mensagem });
+  }, []);
+  const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
 
-  // FUNÇÃO AUXILIAR PARA FORMATAR A DATA (YYYY-MM-DD)
-  const getDataDeHoje = () => {
-    const hoje = new Date();
-    // Ajuste simples para o fuso horário (exemplo) ou usar biblioteca se necessário
-    return hoje.toISOString().split('T')[0]; 
-  };
-
-  // BUSCAR DADOS DA TURMA E VERIFICAR SE JÁ HOUVE CHAMADA HOJE
-  useEffect(() => {
-    const buscarDadosBase = async () => {
-      if (!id) return;
-      setCarregandoDados(true);
-      try {
-        // 1. Buscar a Turma
-        const docRef = doc(db, 'turmas', id as string);
-        const docSnap = await getDoc(docRef);
-        
-        if (docSnap.exists()) {
-          setTurma(docSnap.data());
-        }
-
-        // 2. Verificar se JÁ EXISTE uma chamada gravada HOJE para esta turma
-        const dataHoje = getDataDeHoje();
-        const chamadasRef = collection(db, 'chamadas');
-        const q = query(chamadasRef, 
-          where('turmaId', '==', id),
-          where('dataChamadaFormatada', '==', dataHoje) // Usamos um formato simples YYYY-MM-DD
-        );
-        
-        const querySnapshot = await getDocs(q);
-        
-        if (!querySnapshot.empty) {
-          // Já existe uma chamada hoje! Vamos carregar os dados e bloquear a tela.
-          const chamadaRealizada = querySnapshot.docs[0].data();
-          setChamadaIdRealizada(querySnapshot.docs[0].id);
-          setChamadaConcluida(true);
-          
-          // Mapeamos a estrutura do banco de volta para o estado local, garantindo que 'mostrarObs' fica falso por defeito
-          if (chamadaRealizada.alunos && chamadaRealizada.alunos.length > 0) {
-              setAlunos(chamadaRealizada.alunos.map((a: any) => ({
-                  ...a,
-                  mostrarObs: false // Apenas controle de UI
-              })));
-          }
-        }
-      } catch (error) {
-        console.error("Erro ao buscar dados básicos:", error);
-      } finally {
-        setCarregandoDados(false);
+  const buscarDadosChamada = useCallback(async () => {
+    if (!aulaId) {
+      setCarregando(false);
+      return;
+    }
+    setCarregando(true);
+    try {
+      let dadosAula: any = null;
+      const gradeSnap = await getDoc(doc(db, 'grade_aulas', aulaId));
+      if (gradeSnap.exists()) {
+        dadosAula = { id: gradeSnap.id, ...gradeSnap.data() };
+      } else {
+        const turmaSnap = await getDoc(doc(db, 'turmas', aulaId));
+        if (turmaSnap.exists()) dadosAula = { id: turmaSnap.id, ...turmaSnap.data() };
       }
-    };
+      setAulaInfo(dadosAula);
 
-    buscarDadosBase();
-  }, [id]);
+      const dataHoje = getDataDeHoje();
+      const chamadasSnap = await getDocs(
+        query(collection(db, 'chamadas'), where('turmaId', '==', aulaId), where('dataChamadaFormatada', '==', dataHoje))
+      );
 
-  const alternarPresenca = (alunoId: string, aulaIndex: number) => {
-    if (chamadaConcluida && !isAdmin) return; 
-    setAlunos(prev => prev.map(aluno => {
-      if (aluno.id === alunoId) {
-        const novasPresencas = [...aluno.presencas];
-        novasPresencas[aulaIndex] = !novasPresencas[aulaIndex];
-        return { ...aluno, presencas: novasPresencas };
+      if (!chamadasSnap.empty) {
+        const chamadaSalva = chamadasSnap.docs[0].data() as any;
+        setChamadaConcluida(true);
+        setConteudoMinistrado(String(chamadaSalva.conteudoMinistrado || ''));
+        if (chamadaSalva.dataChamada) {
+          setHoraAssinatura(new Date(chamadaSalva.dataChamada).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+        }
+        if (Array.isArray(chamadaSalva.alunos)) {
+          setAlunos(
+            chamadaSalva.alunos.map((a: any) => {
+              let st: StatusPresenca = 'presente';
+              if (a.status === 'falta' || a.status === 'justificada' || a.status === 'presente') {
+                st = a.status;
+              } else if (Array.isArray(a.presencas) && a.presencas.some((p: boolean) => !p)) {
+                st = 'falta';
+              }
+              return {
+                id: String(a.id),
+                nome: String(a.nome || 'Aluno'),
+                matricula: a.matricula || '',
+                status: st,
+                obs: String(a.obs || ''),
+                mostrarObs: false,
+              };
+            })
+          );
+        }
+      } else {
+        setChamadaConcluida(false);
+        setHoraAssinatura('');
+        const alunosSnap = await getDocs(collection(db, 'alunos'));
+        const turmaRealId = dadosAula?.turmaId || aulaId;
+        const nomeTurma = String(dadosAula?.nome || dadosAula?.turmaNome || '');
+        const listaAlunos: AlunoChamada[] = alunosSnap.docs
+          .map(d => ({ id: d.id, ...(d.data() as any) }))
+          .filter(a => a.turmaId === turmaRealId || (nomeTurma && (a.turmaNome === nomeTurma || a.turma === nomeTurma)))
+          .map(a => ({
+            id: a.id,
+            nome: String(a.nome || 'Aluno sem nome'),
+            matricula: typeof a.matricula === 'string' ? a.matricula : '',
+            status: 'presente' as StatusPresenca,
+            obs: '',
+            mostrarObs: false,
+          }))
+          .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+        setAlunos(listaAlunos);
       }
-      return aluno;
-    }));
+    } catch (error: any) {
+      notificar('erro', 'Erro ao carregar diário', error?.message || 'Falha ao consultar o Firestore.');
+    } finally { setCarregando(false); }
+  }, [aulaId, notificar]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void buscarDadosChamada();
+    }, [buscarDadosChamada])
+  );
+
+  const alterarStatus = (alunoId: string, novoStatus: StatusPresenca) => {
+    if (chamadaConcluida && !isAdmin) return;
+    setAlunos(prev => prev.map(a => (a.id === alunoId ? { ...a, status: novoStatus } : a)));
   };
 
   const toggleMostrarObs = (alunoId: string) => {
-    if (chamadaConcluida && !isAdmin) return;
-    setAlunos(prev => prev.map(a => a.id === alunoId ? { ...a, mostrarObs: !a.mostrarObs } : a));
+    setAlunos(prev => prev.map(a => (a.id === alunoId ? { ...a, mostrarObs: !a.mostrarObs } : a)));
   };
 
   const setObservacao = (alunoId: string, texto: string) => {
-    setAlunos(prev => prev.map(a => a.id === alunoId ? { ...a, obs: texto } : a));
+    if (chamadaConcluida && !isAdmin) return;
+    setAlunos(prev => prev.map(a => (a.id === alunoId ? { ...a, obs: texto } : a)));
   };
 
+  const resumo = useMemo(() => ({
+    presentes: alunos.filter(a => a.status === 'presente').length,
+    faltas: alunos.filter(a => a.status === 'falta').length,
+    justificadas: alunos.filter(a => a.status === 'justificada').length,
+  }), [alunos]);
+
+  const alunosFiltrados = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+    if (!termo) return alunos;
+    return alunos.filter(a => a.nome.toLowerCase().includes(termo));
+  }, [alunos, busca]);
+
   const confirmarAssinatura = async () => {
-    if (senhaConfirmacao.trim() === '') {
-      if (Platform.OS === 'web') window.alert("Erro\nDigite sua senha para assinar o diário.");
-      else Alert.alert("Erro", "Digite sua senha para assinar o diário.");
-      return;
+    if (senhaConfirmacao.trim().length < 4) {
+      return notificar('aviso', 'Senha obrigatória', 'Digite sua senha (mínimo 4 caracteres) para assinar o diário.');
     }
-    
-    setCarregandoDados(true);
+    setSalvando(true);
     try {
-      // Cria um registro oficial na coleção 'chamadas'
-      const novaChamadaData = {
-        turmaId: id,
-        disciplina: turma?.disciplina || 'Desconhecida',
-        dataChamada: new Date().toISOString(),
-        dataChamadaFormatada: getDataDeHoje(), // Facilita a query diária!
+      const agora = new Date();
+      await addDoc(collection(db, 'chamadas'), {
+        turmaId: aulaId,
+        turmaRealId: aulaInfo?.turmaId || aulaId,
+        turmaNome: aulaInfo?.nome || aulaInfo?.turmaNome || 'Turma',
+        disciplina: aulaInfo?.disciplina || aulaInfo?.materia || 'Disciplina',
+        professorNome: aulaInfo?.professorNome || 'Luffy Baiano',
+        horario: aulaInfo?.horario || '',
+        conteudoMinistrado: conteudoMinistrado.trim(),
+        dataChamada: agora.toISOString(),
+        dataChamadaFormatada: getDataDeHoje(),
         assinaturaProf: true,
+        totalPresentes: resumo.presentes,
+        totalFaltas: resumo.faltas,
+        totalJustificadas: resumo.justificadas,
+        criadoEm: serverTimestamp(),
         alunos: alunos.map(a => ({
           id: a.id,
           nome: a.nome,
-          presencas: a.presencas,
-          obs: a.obs
-        }))
-      };
-
-      await addDoc(collection(db, 'chamadas'), novaChamadaData);
-
+          matricula: a.matricula || '',
+          status: a.status,
+          presencas: [a.status !== 'falta'],
+          obs: a.obs.trim(),
+        })),
+      });
       setChamadaConcluida(true);
+      setHoraAssinatura(agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
       setModalAssinatura(false);
-      
-      if (Platform.OS === 'web') window.alert("Diário Assinado!\nA chamada foi registrada e bloqueada com sucesso.");
-      else Alert.alert("Diário Assinado", "A chamada foi registrada e bloqueada com sucesso.");
-      
+      setSenhaConfirmacao('');
+      notificar('sucesso', 'Diário Assinado!', 'Frequência registrada e bloqueada com sucesso.');
     } catch (error: any) {
-      console.error("Erro ao salvar chamada:", error);
-      if (Platform.OS === 'web') window.alert("Erro\nFalha ao salvar a chamada.");
-      else Alert.alert("Erro", "Falha ao salvar a chamada no banco de dados.");
-    } finally {
-        setCarregandoDados(false);
-        setSenhaConfirmacao('');
-    }
+      notificar('erro', 'Erro ao salvar chamada', error?.message || 'Falha ao gravar no Firestore.');
+    } finally { setSalvando(false); }
   };
 
-  const renderAluno = ({ item }: { item: any }) => {
-    const totalFaltas = item.presencas.filter((p: boolean) => !p).length;
-    const isFaltou = totalFaltas > 0;
+  const toastProps = {
+    feedback,
+    onFechar: fecharFeedback,
+    fundoCard: tema.fundoTopo,
+    textoPrincipal: tema.textoPrincipal,
+    textoSecundario: tema.textoSecundario,
+  };
+
+  const renderAluno = ({ item }: { item: AlunoChamada }) => {
+    const corBorda = item.status === 'falta' ? '#C62828' : item.status === 'justificada' ? '#EF6C00' : tema.borda;
+    const bloqueado = chamadaConcluida && !isAdmin;
 
     return (
-      <View style={[styles.cardAluno, { 
-        backgroundColor: tema.inputBackground, 
-        borderColor: isFaltou ? '#EF9A9A' : tema.borda,
-        opacity: chamadaConcluida ? 0.6 : 1 
-      }]}>
+      <View style={[styles.cardAluno, { backgroundColor: tema.inputBackground, borderColor: corBorda }]}>
         <View style={styles.linhaPrincipal}>
-          <View style={styles.infoAluno}>
-            <Text style={[styles.nomeAluno, { color: tema.textoPrincipal }]}>{item.nome}</Text>
-            {isFaltou && <Text style={[styles.badgeFalta, { color: '#C62828' }]}>{totalFaltas} Falta(s)</Text>}
+          <View style={[styles.avatarIniciais, { backgroundColor: tema.botaoPrimario + '20' }]}>
+            <Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: '800' }}>{obterIniciais(item.nome)}</Text>
           </View>
-          
+          <View style={styles.infoAluno}>
+            <Text style={[styles.nomeAluno, { color: tema.textoPrincipal }]} numberOfLines={1}>{item.nome}</Text>
+            {!!item.matricula && <Text style={{ color: tema.textoSecundario, fontSize: 11 }}>Mat. {item.matricula}</Text>}
+          </View>
+
           <View style={styles.areaBotoes}>
-            {/* CHECKBOX 1º HORÁRIO */}
-            <TouchableOpacity 
-              disabled={chamadaConcluida && !isAdmin}
-              style={styles.checkboxContainer}
-              onPress={() => alternarPresenca(item.id, 0)}
-            >
-              <Ionicons 
-                name={item.presencas[0] ? "checkbox" : "square-outline"} 
-                size={30} 
-                color={item.presencas[0] ? '#2E7D32' : '#C62828'} 
+            {([
+              { key: 'presente', label: 'P', cor: '#2E7D32' },
+              { key: 'falta', label: 'F', cor: '#C62828' },
+              { key: 'justificada', label: 'J', cor: '#EF6C00' },
+            ] as const).map(op => {
+              const ativo = item.status === op.key;
+              return (
+                <TouchableOpacity
+                  key={op.key}
+                  disabled={bloqueado}
+                  onPress={() => alterarStatus(item.id, op.key)}
+                  style={[
+                    styles.btnStatusPill,
+                    {
+                      backgroundColor: ativo ? op.cor : tema.fundoBase,
+                      borderColor: ativo ? op.cor : tema.borda,
+                      opacity: bloqueado && !ativo ? 0.35 : 1,
+                    },
+                  ]}
+                >
+                  <Text style={{ color: ativo ? '#FFF' : tema.textoSecundario, fontSize: 12, fontWeight: '800' }}>{op.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+            <TouchableOpacity style={styles.btnObsIcon} onPress={() => toggleMostrarObs(item.id)}>
+              <Ionicons
+                name={item.obs ? 'chatbox-ellipses' : 'chatbox-ellipses-outline'}
+                size={20}
+                color={item.obs ? tema.botaoPrimario : tema.textoSecundario}
               />
-            </TouchableOpacity>
-
-            {/* CHECKBOX 2º HORÁRIO */}
-            {isAulaDupla && (
-              <TouchableOpacity 
-                disabled={chamadaConcluida && !isAdmin}
-                style={styles.checkboxContainer}
-                onPress={() => alternarPresenca(item.id, 1)}
-              >
-                <Ionicons 
-                  name={item.presencas[1] ? "checkbox" : "square-outline"} 
-                  size={30} 
-                  color={item.presencas[1] ? '#2E7D32' : '#C62828'} 
-                />
-              </TouchableOpacity>
-            )}
-
-            <TouchableOpacity disabled={chamadaConcluida && !isAdmin} style={styles.btnAcaoExtra} onPress={() => toggleMostrarObs(item.id)}>
-              <Ionicons name="chatbox-ellipses-outline" size={24} color={item.obs ? tema.botaoPrimario : tema.textoSecundario} />
             </TouchableOpacity>
           </View>
         </View>
@@ -211,12 +260,12 @@ export default function ChamadaScreen() {
         {item.mostrarObs && (
           <View style={[styles.areaObs, { borderTopColor: tema.borda }]}>
             <TextInput
-              editable={!chamadaConcluida || isAdmin}
+              editable={!bloqueado}
               style={[styles.inputObs, { color: tema.textoPrincipal, backgroundColor: tema.fundoBase, borderColor: tema.borda }]}
-              placeholder="Ex: Chegou atrasado por causa do transporte..."
+              placeholder="Observação do aluno (ex: atraso, atestado...)"
               placeholderTextColor={tema.textoSecundario}
               value={item.obs}
-              onChangeText={(text) => setObservacao(item.id, text)}
+              onChangeText={text => setObservacao(item.id, text)}
               multiline
             />
           </View>
@@ -227,154 +276,202 @@ export default function ChamadaScreen() {
 
   return (
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: tema.fundoBase }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      
       <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.btnVoltar}>
-            <Ionicons name="arrow-back" size={26} color={tema.textoLogo} />
+          <TouchableOpacity onPress={() => router.back()} style={styles.btnVoltar} accessibilityLabel="Voltar">
+            <Ionicons name="arrow-back" size={24} color={tema.textoLogo} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.titulo, { color: tema.textoLogo }]}>Registro de Frequência</Text>
-            <View style={styles.subtituloRow}>
-              {carregandoDados ? (
-                <ActivityIndicator size="small" color={tema.textoLogo} style={{ alignSelf: 'flex-start' }} />
-              ) : (
-                <Text style={[styles.subtitulo, { color: tema.textoLogo, opacity: 0.9 }]}>
-                  {turma ? `${turma.nome} • ${turma.disciplina || turma.materia}` : 'Turma não encontrada'}
-                </Text>
-              )}
-            </View>
+            <Text style={[styles.titulo, { color: tema.textoLogo }]} numberOfLines={1}>
+              {aulaInfo ? `${aulaInfo.nome || aulaInfo.turmaNome} • ${aulaInfo.disciplina || aulaInfo.materia || ''}` : 'Registro de Frequência'}
+            </Text>
+            <Text style={[styles.subtitulo, { color: tema.textoLogo, opacity: 0.85 }]}>
+              {aulaInfo?.horario ? `${aulaInfo.horario} • ${aulaInfo.turno || 'Matutino'}` : 'Diário de Classe Digital'}
+            </Text>
           </View>
         </View>
-        <View style={[styles.statusContainer, { backgroundColor: chamadaConcluida ? 'rgba(255,255,255,0.2)' : 'rgba(46, 125, 50, 0.8)' }]}>
-          <Ionicons name={chamadaConcluida ? "lock-closed" : "document-text"} size={16} color="#FFF" />
-          <Text style={styles.textoStatus}>{chamadaConcluida ? "Diário Assinado e Fechado" : "Diário Aberto - Preenchimento"}</Text>
+
+        <View style={[styles.statusContainer, { backgroundColor: chamadaConcluida ? 'rgba(255,255,255,0.16)' : '#2E7D32' }]}>
+          <Ionicons name={chamadaConcluida ? 'lock-closed' : 'document-text-outline'} size={15} color="#FFF" />
+          <Text style={styles.textoStatus}>
+            {chamadaConcluida ? `Diário Assinado e Fechado${horaAssinatura ? ` (${horaAssinatura})` : ''}` : 'Diário Aberto • Marque P (Presente), F (Falta) ou J (Justificada)'}
+          </Text>
+        </View>
+
+        <View style={[styles.searchContainer, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+          <Ionicons name="search" size={18} color={tema.textoSecundario} style={{ marginRight: 8 }} />
+          <TextInput
+            style={[styles.searchInput, { color: tema.textoPrincipal }]}
+            placeholder="Buscar aluno..."
+            placeholderTextColor={tema.textoSecundario}
+            value={busca}
+            onChangeText={setBusca}
+          />
         </View>
       </View>
 
-      {/* CABEÇALHO DAS COLUNAS (HORÁRIOS) */}
-      <View style={[styles.colunasHeader, { borderBottomColor: tema.borda }]}>
-        <Text style={[styles.colunaAlunoTexto, { color: tema.textoSecundario }]}>Nome do Aluno</Text>
-        <View style={styles.colunasAcoes}>
-          <View style={styles.colunaInfo}>
-            <Text style={[styles.textoHorarioCol, { color: tema.textoPrincipal }]}>1º Horário</Text>
-            <Text style={[styles.textoHoraMinuto, { color: tema.textoSecundario }]}>{horario1}</Text>
-          </View>
-          {isAulaDupla && (
-            <View style={styles.colunaInfo}>
-              <Text style={[styles.textoHorarioCol, { color: tema.textoPrincipal }]}>2º Horário</Text>
-              <Text style={[styles.textoHoraMinuto, { color: tema.textoSecundario }]}>{horario2}</Text>
-            </View>
-          )}
-          <View style={styles.colunaObs}>
-            <Text style={[styles.textoHorarioCol, { color: tema.textoPrincipal }]}>Obs</Text>
-          </View>
+      {carregando ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={tema.botaoPrimario} />
+          <Text style={{ marginTop: 10, color: tema.textoSecundario }}>Sincronizando diário...</Text>
         </View>
-      </View>
-
-      {carregandoDados ? (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <ActivityIndicator size="large" color={tema.botaoPrimario} />
-              <Text style={{ marginTop: 10, color: tema.textoSecundario }}>Sincronizando diário...</Text>
-          </View>
       ) : (
         <FlatList
-          data={alunos}
-          keyExtractor={(item) => item.id}
+          data={alunosFiltrados}
+          keyExtractor={item => item.id}
           renderItem={renderAluno}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, !chamadaConcluida && { paddingBottom: 115 }]}
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosChamada()} tintColor={tema.botaoPrimario} />}
+          ListHeaderComponent={
+            <View>
+              <View style={styles.resumoRow}>
+                {[
+                  { label: 'Presentes', valor: resumo.presentes, cor: '#2E7D32', icone: 'checkmark-circle-outline' as const },
+                  { label: 'Faltas', valor: resumo.faltas, cor: '#C62828', icone: 'close-circle-outline' as const },
+                  { label: 'Justificadas', valor: resumo.justificadas, cor: '#EF6C00', icone: 'document-text-outline' as const },
+                ].map(kpi => (
+                  <View key={kpi.label} style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                    <Ionicons name={kpi.icone} size={18} color={kpi.cor} />
+                    <Text style={[styles.valorResumo, { color: tema.textoPrincipal }]}>{kpi.valor}</Text>
+                    <Text style={[styles.labelResumo, { color: tema.textoSecundario }]}>{kpi.label}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={[styles.cardConteudo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                <Text style={[styles.labelConteudo, { color: tema.textoSecundario }]}>Conteúdo Ministrado (Diário de Classe)</Text>
+                <TextInput
+                  editable={!chamadaConcluida || isAdmin}
+                  value={conteudoMinistrado}
+                  onChangeText={setConteudoMinistrado}
+                  placeholder="Ex: Equações de 2º grau e exercícios em sala..."
+                  placeholderTextColor={tema.textoSecundario}
+                  multiline
+                  style={[styles.inputConteudo, { color: tema.textoPrincipal, backgroundColor: tema.fundoBase, borderColor: tema.borda }]}
+                />
+              </View>
+            </View>
+          }
+          ListEmptyComponent={
+            <View style={{ alignItems: 'center', marginTop: 30 }}>
+              <Ionicons name="people-outline" size={38} color={tema.textoSecundario} />
+              <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 15, marginTop: 10 }}>Nenhum aluno encontrado</Text>
+              <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 4, textAlign: 'center' }}>
+                Não há alunos matriculados nesta turma ainda.
+              </Text>
+            </View>
+          }
         />
       )}
 
-      {(!chamadaConcluida && !carregandoDados) && (
-        <View style={[styles.rodapeContainer, { backgroundColor: tema.fundoTopo }]}>
-          <View style={styles.resumoRow}>
-            <Text style={[styles.textoResumo, { color: tema.textoLogo }]}>Presentes: {alunos.filter(a => isAulaDupla ? (a.presencas[0] || a.presencas[1]) : a.presencas[0]).length}</Text>
-            <Text style={[styles.textoResumo, { color: tema.textoLogo }]}>Faltas totais: {alunos.filter(a => isAulaDupla ? (!a.presencas[0] && !a.presencas[1]) : !a.presencas[0]).length}</Text>
+      {!chamadaConcluida && !carregando && alunos.length > 0 && (
+        <View style={[styles.rodapeFixo, { backgroundColor: tema.fundoTopo, borderTopColor: tema.borda }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: tema.textoLogo, fontSize: 13, fontWeight: '700' }}>
+              {resumo.presentes} presente(s) • {resumo.faltas} falta(s)
+            </Text>
+            <Text style={{ color: tema.textoLogo, fontSize: 11, opacity: 0.75 }}>
+              Pronto para assinatura digital
+            </Text>
           </View>
           <TouchableOpacity style={[styles.btnConcluir, { backgroundColor: tema.botaoPrimario }]} onPress={() => setModalAssinatura(true)} activeOpacity={0.8}>
-            <Ionicons name="finger-print" size={20} color="#FFF" style={{ marginRight: 8 }} />
-            <Text style={styles.textoBtnConcluir}>Assinar Diário Digital</Text>
+            <Ionicons name="shield-checkmark-outline" size={18} color={tema.textoBotao} />
+            <Text style={{ color: tema.textoBotao, fontSize: 13, fontWeight: '800' }}>Assinar Diário</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      <Modal visible={modalAssinatura} transparent={true} animationType="slide">
+      <Modal visible={modalAssinatura} transparent animationType="fade" onRequestClose={() => setModalAssinatura(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: tema.fundoBase }]}>
-            <View style={[styles.iconeSeguranca, { backgroundColor: tema.botaoPrimario + '20' }]}>
-              <Ionicons name="shield-checkmark" size={40} color={tema.botaoPrimario} />
-            </View>
-            <Text style={[styles.tituloModal, { color: tema.textoPrincipal }]}>Assinatura Eletrônica</Text>
-            <Text style={[styles.textoModal, { color: tema.textoSecundario }]}>Insira sua senha para concluir e bloquear este diário de classe.</Text>
-            <View style={[styles.inputContainer, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-              <Ionicons name="lock-closed-outline" size={20} color={tema.icone} style={{ marginRight: 10 }} />
-              <TextInput style={[styles.inputSenha, { color: tema.textoPrincipal }]} placeholder="Sua senha de acesso" placeholderTextColor={tema.textoSecundario} secureTextEntry value={senhaConfirmacao} onChangeText={setSenhaConfirmacao} />
-            </View>
-            <View style={styles.modalBotoes}>
-              <TouchableOpacity style={styles.btnCancelar} onPress={() => setModalAssinatura(false)}>
-                <Text style={{ color: tema.textoSecundario, fontWeight: 'bold' }}>Revisar</Text>
+          <View style={[styles.modalCardCentro, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="shield-checkmark" size={20} color={tema.botaoPrimario} />
+                <Text style={[styles.tituloModal, { color: tema.textoPrincipal }]}>Assinatura Eletrônica</Text>
+              </View>
+              <TouchableOpacity onPress={() => setModalAssinatura(false)}>
+                <Ionicons name="close" size={22} color={tema.textoSecundario} />
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.btnConfirmar, { backgroundColor: tema.botaoPrimario }]} onPress={confirmarAssinatura}>
-                <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Assinar</Text>
-              </TouchableOpacity>
+            </View>
+            <View style={{ padding: 20 }}>
+              <View style={[styles.boxResumoModal, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
+                <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 14 }}>
+                  {aulaInfo?.nome || 'Turma'} • {aulaInfo?.disciplina || aulaInfo?.materia || ''}
+                </Text>
+                <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 4 }}>
+                  Presentes: {resumo.presentes} • Faltas: {resumo.faltas} • Justificadas: {resumo.justificadas}
+                </Text>
+              </View>
+
+              <Text style={[styles.labelConteudo, { color: tema.textoPrincipal, marginTop: 14 }]}>Confirme sua senha docente *</Text>
+              <TextInput
+                style={[styles.inputSenhaModal, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]}
+                placeholder="Digite sua senha de acesso..."
+                placeholderTextColor={tema.textoSecundario}
+                secureTextEntry
+                value={senhaConfirmacao}
+                onChangeText={setSenhaConfirmacao}
+              />
+
+              <View style={styles.modalBotoes}>
+                <TouchableOpacity style={[styles.btnCancelar, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]} onPress={() => setModalAssinatura(false)} disabled={salvando}>
+                  <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 13 }}>Revisar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.btnConfirmar, { backgroundColor: '#2E7D32' }]} onPress={() => void confirmarAssinatura()} disabled={salvando}>
+                  <Ionicons name="checkmark-done" size={16} color="#FFF" />
+                  <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 13 }}>{salvando ? 'Assinando...' : 'Assinar e Fechar'}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
+          <FeedbackToast {...toastProps} />
         </View>
       </Modal>
 
+      <FeedbackToast {...toastProps} />
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingTop: 40, paddingBottom: 20, paddingHorizontal: 20, elevation: 5 },
+  header: { paddingTop: 50, paddingBottom: 18, paddingHorizontal: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, elevation: 5 },
   headerRow: { flexDirection: 'row', alignItems: 'center' },
-  btnVoltar: { marginRight: 15 },
-  titulo: { fontSize: 20, fontWeight: 'bold' },
-  subtituloRow: { marginTop: 4 },
-  subtitulo: { fontSize: 14, fontWeight: '600' },
-  statusContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 15, paddingVertical: 8, borderRadius: 8 },
-  textoStatus: { color: '#FFF', fontSize: 13, fontWeight: 'bold', marginLeft: 8 },
-  
-  colunasHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 10, borderBottomWidth: 1 },
-  colunaAlunoTexto: { fontSize: 12, fontWeight: 'bold', flex: 1 },
-  colunasAcoes: { flexDirection: 'row', alignItems: 'center', gap: 15 },
-  colunaInfo: { alignItems: 'center', width: 60 },
-  textoHorarioCol: { fontSize: 11, fontWeight: 'bold' },
-  textoHoraMinuto: { fontSize: 9, marginTop: 2 },
-  colunaObs: { width: 30, alignItems: 'center' },
-
-  listContent: { padding: 15, paddingBottom: 120 },
-  cardAluno: { borderWidth: 1, borderRadius: 12, marginBottom: 8, overflow: 'hidden' },
-  linhaPrincipal: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12 },
-  infoAluno: { flex: 1, justifyContent: 'center' },
-  nomeAluno: { fontSize: 15, fontWeight: 'bold' },
-  badgeFalta: { fontSize: 11, fontWeight: 'bold', marginTop: 2 },
-  
-  areaBotoes: { flexDirection: 'row', alignItems: 'center', gap: 15 },
-  checkboxContainer: { width: 60, alignItems: 'center', justifyContent: 'center' },
-  btnAcaoExtra: { width: 30, alignItems: 'center', justifyContent: 'center' },
-  
-  areaObs: { paddingHorizontal: 12, paddingBottom: 12, borderTopWidth: 1, paddingTop: 12 },
-  inputObs: { borderWidth: 1, borderRadius: 8, padding: 10, minHeight: 60, textAlignVertical: 'top', fontSize: 13 },
-  
-  rodapeContainer: { position: 'absolute', bottom: 0, width: '100%', padding: 20, borderTopLeftRadius: 20, borderTopRightRadius: 20, elevation: 10 },
-  resumoRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 15 },
-  textoResumo: { fontSize: 14, fontWeight: 'bold' },
-  btnConcluir: { flexDirection: 'row', height: 50, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  textoBtnConcluir: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { width: '100%', borderRadius: 20, padding: 25, alignItems: 'center', elevation: 10 },
-  iconeSeguranca: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
-  tituloModal: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },
-  textoModal: { fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 20 },
-  inputContainer: { flexDirection: 'row', alignItems: 'center', width: '100%', height: 50, borderWidth: 1, borderRadius: 10, paddingHorizontal: 15, marginBottom: 25 },
-  inputSenha: { flex: 1, height: '100%', fontSize: 16 },
-  modalBotoes: { flexDirection: 'row', width: '100%', justifyContent: 'space-between' },
-  btnCancelar: { flex: 1, height: 45, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  btnConfirmar: { flex: 1, height: 45, justifyContent: 'center', alignItems: 'center', borderRadius: 8 }
+  btnVoltar: { marginRight: 12, padding: 4 },
+  titulo: { fontSize: 19, fontWeight: 'bold' },
+  subtitulo: { fontSize: 12, marginTop: 2 },
+  statusContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 10, gap: 6 },
+  textoStatus: { color: '#FFF', fontSize: 11, fontWeight: 'bold' },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', height: 42, borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, marginTop: 12 },
+  searchInput: { flex: 1, height: '100%', fontSize: 14 },
+  listContent: { padding: 20, paddingBottom: 40 },
+  resumoRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  cardResumo: { flex: 1, borderWidth: 1, borderRadius: 12, padding: 12, alignItems: 'center' },
+  valorResumo: { fontSize: 20, fontWeight: 'bold', marginTop: 4 },
+  labelResumo: { fontSize: 11, marginTop: 2 },
+  cardConteudo: { borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 16 },
+  labelConteudo: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
+  inputConteudo: { borderWidth: 1, borderRadius: 8, padding: 10, minHeight: 54, textAlignVertical: 'top', fontSize: 13 },
+  cardAluno: { borderWidth: 1, borderRadius: 12, marginBottom: 10, overflow: 'hidden' },
+  linhaPrincipal: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 10 },
+  avatarIniciais: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  infoAluno: { flex: 1 },
+  nomeAluno: { fontSize: 14, fontWeight: 'bold' },
+  areaBotoes: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  btnStatusPill: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
+  btnObsIcon: { padding: 4, marginLeft: 2 },
+  areaObs: { padding: 12, borderTopWidth: 1 },
+  inputObs: { borderWidth: 1, borderRadius: 8, padding: 10, minHeight: 54, textAlignVertical: 'top', fontSize: 13 },
+  rodapeFixo: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 14, borderTopWidth: 1, gap: 12, elevation: 10 },
+  btnConcluir: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, height: 42, borderRadius: 10 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.68)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalCardCentro: { width: '100%', maxWidth: 420, borderRadius: 18, borderWidth: 1, overflow: 'hidden' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 18, borderBottomWidth: 1 },
+  tituloModal: { fontSize: 16, fontWeight: 'bold' },
+  boxResumoModal: { borderWidth: 1, borderRadius: 12, padding: 12 },
+  inputSenhaModal: { borderWidth: 1, borderRadius: 10, height: 44, paddingHorizontal: 12, fontSize: 14 },
+  modalBotoes: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  btnCancelar: { flex: 1, height: 44, borderWidth: 1, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  btnConfirmar: { flex: 1.4, flexDirection: 'row', gap: 6, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
 });
