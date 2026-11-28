@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addDoc, collection, deleteDoc, doc, getDocs, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
 import { db } from '../../config/firebase';
@@ -64,11 +65,14 @@ const formatarDataInput = (valor: string) => {
 
 export default function AvaliacoesScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isCoord = perfil === 'coordenador';
   const isProf = perfil === 'professor';
+  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
 
   // === ESTADOS ===
+  const [alturaTeclado, setAlturaTeclado] = useState(0);
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoItem[]>([]);
   const [turmasBanco, setTurmasBanco] = useState<any[]>([]);
   const [professoresBanco, setProfessoresBanco] = useState<any[]>([]);
@@ -92,6 +96,22 @@ export default function AvaliacoesScreen() {
     setFeedback({ visivel: true, tipo, titulo, mensagem });
   }, []);
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
+
+  // === AJUSTE DO TECLADO EM MODAIS ===
+  useEffect(() => {
+    const eventoMostrar = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const eventoEsconder = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const subShow = Keyboard.addListener(eventoMostrar, e => {
+      setAlturaTeclado(e.endCoordinates?.height || 0);
+    });
+    const subHide = Keyboard.addListener(eventoEsconder, () => {
+      setAlturaTeclado(0);
+    });
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
 
   // === CARREGAMENTO DE DADOS (FIRESTORE) ===
   const buscarDadosAvaliacoes = useCallback(async () => {
@@ -286,6 +306,8 @@ export default function AvaliacoesScreen() {
   };
 
   const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
+  const estiloOverlayTeclado = { paddingBottom: alturaTeclado > 0 ? alturaTeclado : 0 };
+  const estiloScrollModal = { padding: 20, paddingBottom: alturaTeclado > 0 ? 150 : 28 + bottomInset };
 
   // === RENDERIZADORES ===
   const renderCardProfessor = ({ item }: { item: AvaliacaoItem }) => {
@@ -424,7 +446,7 @@ export default function AvaliacoesScreen() {
         data={avaliacoesFiltradas}
         keyExtractor={item => item.id}
         renderItem={isProf ? renderCardProfessor : renderPastaCoordenador}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: 40 + bottomInset }]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosAvaliacoes()} tintColor={tema.botaoPrimario} />}
         ListHeaderComponent={
@@ -491,13 +513,13 @@ export default function AvaliacoesScreen() {
 
       {/* Modal: Filtros */}
       <Modal visible={modalFiltro} transparent animationType="slide" onRequestClose={() => setModalFiltro(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Filtrar Avaliações</Text>
               <TouchableOpacity onPress={() => setModalFiltro(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <ScrollView contentContainerStyle={estiloScrollModal} showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Bimestre</Text>
               <View style={styles.rowChips}>
                 {FILTROS_BIMESTRE.map(b => {
@@ -549,13 +571,13 @@ export default function AvaliacoesScreen() {
 
       {/* Modal: Nova Avaliação (Coordenador) */}
       <Modal visible={modalNovaAv} transparent animationType="slide" onRequestClose={() => setModalNovaAv(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Nova Avaliação</Text>
               <TouchableOpacity onPress={() => setModalNovaAv(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }} keyboardShouldPersistTaps="handled">
+            <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Título da Avaliação *</Text>
               <TextInput value={formAv.titulo} onChangeText={v => setFormAv(prev => ({ ...prev, titulo: v }))} placeholder="Ex: 1ª Av. Bimestral" placeholderTextColor={tema.textoSecundario} style={[styles.inputModal, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]} />
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Bimestre *</Text>
@@ -657,7 +679,7 @@ const styles = StyleSheet.create({
   rowAcoesPasta: { flexDirection: 'row', gap: 8 },
   btnAcaoPasta: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 38, borderRadius: 10, gap: 6 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  modalConteudo: { maxHeight: '88%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, paddingBottom: 24 },
+  modalConteudo: { maxHeight: '88%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1 },
   modalTitulo: { fontSize: 18, fontWeight: 'bold' },
   labelCampo: { fontSize: 12, fontWeight: '700', marginBottom: 6 },

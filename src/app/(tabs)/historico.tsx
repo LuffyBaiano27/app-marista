@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator, Modal, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Keyboard, KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator, Modal, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
 import { db } from '../../config/firebase';
@@ -52,12 +53,15 @@ const obterIniciais = (nome: string) => {
 
 export default function HistoricoScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { aba } = useLocalSearchParams<{ aba?: string }>();
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isAdmin = perfil === 'admin';
   const isProf = perfil === 'professor';
+  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
 
   // === ESTADOS ===
+  const [alturaTeclado, setAlturaTeclado] = useState(0);
   const [abaAtiva, setAbaAtiva] = useState<string>(isAdmin ? 'auditoria' : 'frequencia');
   const [busca, setBusca] = useState('');
   const [filtroData, setFiltroData] = useState('');
@@ -78,6 +82,22 @@ export default function HistoricoScreen() {
     setFiltroAula('');
     setDropdownAulaAberto(false);
   }, [isAdmin, aba]);
+
+  // === AJUSTE DO TECLADO ===
+  useEffect(() => {
+    const eventoMostrar = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const eventoEsconder = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const subShow = Keyboard.addListener(eventoMostrar, e => {
+      setAlturaTeclado(e.endCoordinates?.height || 0);
+    });
+    const subHide = Keyboard.addListener(eventoEsconder, () => {
+      setAlturaTeclado(0);
+    });
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
 
   // === CARREGAMENTO DE DADOS (FIRESTORE) ===
   const buscarDados = useCallback(async () => {
@@ -279,6 +299,7 @@ export default function HistoricoScreen() {
   }, [chamadasFiltradas]);
 
   const toggleTurma = (nome: string) => setTurmasExpandidas(prev => (prev.includes(nome) ? prev.filter(t => t !== nome) : [...prev, nome]));
+  const estiloOverlayTeclado = { paddingBottom: alturaTeclado > 0 ? alturaTeclado : 0 };
 
   // === RENDERIZADORES ===
   const renderCabecalhoCard = (icone: keyof typeof Ionicons.glyphMap, cor: string, titulo: string, data: string) => (
@@ -474,7 +495,8 @@ export default function HistoricoScreen() {
           data={listaAtual}
           keyExtractor={(item, index) => item.id || String(item) || index.toString()}
           renderItem={renderAtual}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingBottom: (alturaTeclado > 0 ? 120 : 40) + bottomInset }]}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDados()} tintColor={tema.botaoPrimario} />}
           ListHeaderComponent={
@@ -509,7 +531,7 @@ export default function HistoricoScreen() {
 
       {/* Modal: Consulta Detalhada do Diário de Classe */}
       <Modal visible={diarioSelecionado !== null} transparent animationType="slide" onRequestClose={() => setDiarioSelecionado(null)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <View style={{ flex: 1 }}>
@@ -521,7 +543,7 @@ export default function HistoricoScreen() {
               <TouchableOpacity onPress={() => setDiarioSelecionado(null)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
             {diarioSelecionado && (
-              <ScrollView contentContainerStyle={{ padding: 20 }}>
+              <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 28 + bottomInset }} showsVerticalScrollIndicator={false}>
                 <View style={styles.resumoRow}>
                   <View style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
                     <Text style={{ color: '#2E7D32', fontSize: 18, fontWeight: 'bold' }}>{diarioSelecionado.presentes}</Text>
@@ -620,7 +642,7 @@ const styles = StyleSheet.create({
   tituloPasta: { fontSize: 16, fontWeight: 'bold' },
   conteudoPasta: { paddingLeft: 15, paddingTop: 10, borderLeftWidth: 2, marginLeft: 15, marginTop: 5 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  modalConteudo: { maxHeight: '85%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, paddingBottom: 24 },
+  modalConteudo: { maxHeight: '85%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1 },
   modalTitulo: { fontSize: 17, fontWeight: 'bold' },
   boxConteudoModal: { borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 16 },

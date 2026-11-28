@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Animated, Easing, Image } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Keyboard, KeyboardAvoidingView, Platform, Animated, Easing, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
@@ -38,9 +39,12 @@ const gerarIniciais = (nome: string) => {
 
 export default function LoginScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { setPerfil, setPerfilReal, setUsuarioLogado, setModoTema, temaAtivo: tema } = useDemoProfile();
+  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
 
   // === ESTADOS ===
+  const [alturaTeclado, setAlturaTeclado] = useState(0);
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [verSenha, setVerSenha] = useState(false);
@@ -63,6 +67,21 @@ export default function LoginScreen() {
   const fadeCard = useRef(new Animated.Value(0)).current;
   const orbPulse = useRef(new Animated.Value(0)).current;
   const bolhasAnim = useRef(BOLHAS_CONFIG.map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    const eventoMostrar = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const eventoEsconder = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const subShow = Keyboard.addListener(eventoMostrar, e => {
+      setAlturaTeclado(e.endCoordinates?.height || 0);
+    });
+    const subHide = Keyboard.addListener(eventoEsconder, () => {
+      setAlturaTeclado(0);
+    });
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
 
   useEffect(() => {
     fadeLogo.setValue(0);
@@ -166,13 +185,15 @@ export default function LoginScreen() {
     }
   };
 
+  const tecladoAberto = alturaTeclado > 0;
+
   // === INTERFACE ===
   return (
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: '#16092B' }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <StatusBar style="light" />
 
       {/* Topo Atmosférico Animado (Roxo da Meia-Noite + Bolhas Azul-Galáxia) */}
-      <View style={styles.topSection}>
+      <View style={[styles.topSection, tecladoAberto && { flex: 0.24, paddingTop: 12 }]}>
         <Animated.View style={[styles.orbVioleta, { transform: [{ translateY: orbFloatY }] }]} pointerEvents="none" />
         <Animated.View style={[styles.orbGalaxia, { transform: [{ translateY: orbFloatYInv }] }]} pointerEvents="none" />
 
@@ -201,20 +222,24 @@ export default function LoginScreen() {
           );
         })}
 
-        <TouchableOpacity style={styles.btnTema} onPress={alternarTema} activeOpacity={0.75} accessibilityLabel="Alternar tema">
+        <TouchableOpacity style={[styles.btnTema, { top: Math.max(insets.top + 8, 20) }]} onPress={alternarTema} activeOpacity={0.75} accessibilityLabel="Alternar tema">
           <Ionicons name={isEscuro ? 'sunny' : 'moon'} size={20} color="#F4F3FF" />
         </TouchableOpacity>
 
-        <Animated.View style={{ opacity: fadeLogo, transform: [{ scale: scaleLogo }], alignItems: 'center' }}>
-          <View style={styles.logoHalo}>
-            <View style={styles.logoContainer}>
-              <Image source={ICONE_VIOLETA} style={styles.logoImagem} resizeMode="cover" />
+        <Animated.View style={{ opacity: fadeLogo, transform: [{ scale: tecladoAberto ? 0.72 : scaleLogo }], alignItems: 'center' }}>
+          {!tecladoAberto && (
+            <View style={styles.logoHalo}>
+              <View style={styles.logoContainer}>
+                <Image source={ICONE_VIOLETA} style={styles.logoImagem} resizeMode="cover" />
+              </View>
             </View>
-          </View>
-          <Text style={styles.tituloLogo}>VIOLETA</Text>
-          <View style={styles.pillSubtitulo}>
-            <Text style={styles.subtituloLogo}>GESTÃO EDUCACIONAL</Text>
-          </View>
+          )}
+          <Text style={[styles.tituloLogo, tecladoAberto && { fontSize: 22, letterSpacing: 2.5 }]}>VIOLETA</Text>
+          {!tecladoAberto && (
+            <View style={styles.pillSubtitulo}>
+              <Text style={styles.subtituloLogo}>GESTÃO EDUCACIONAL</Text>
+            </View>
+          )}
         </Animated.View>
       </View>
 
@@ -223,6 +248,9 @@ export default function LoginScreen() {
         style={[
           styles.bottomSection,
           {
+            flex: tecladoAberto ? 0.76 : 0.55,
+            paddingTop: tecladoAberto ? 20 : 30,
+            paddingBottom: tecladoAberto ? 16 : bottomInset,
             backgroundColor: isEscuro ? '#130F21' : tema.fundoBase,
             borderTopColor: isEscuro ? 'rgba(124, 124, 255, 0.35)' : 'rgba(79, 70, 229, 0.18)',
             opacity: fadeCard,
@@ -232,7 +260,7 @@ export default function LoginScreen() {
       >
         <View style={styles.formWrapper}>
           <Text style={[styles.saudacao, { color: tema.textoPrincipal }]}>Bem-vindo!</Text>
-          <Text style={[styles.textoInstrucao, { color: tema.textoSecundario }]}>Acesse sua conta docente, coordenação ou gestão</Text>
+          <Text style={[styles.textoInstrucao, { color: tema.textoSecundario, marginBottom: tecladoAberto ? 14 : 22 }]}>Acesse sua conta docente, coordenação ou gestão</Text>
 
           <View style={[styles.inputContainer, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
             <Ionicons name="mail-outline" size={20} color={tema.botaoPrimario} style={styles.iconeInput} />
@@ -262,7 +290,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.btnEsqueci} onPress={() => notificar('aviso', 'Recuperação de senha', 'Solicite a redefinição à coordenação ou administração da instituição.')}>
+          <TouchableOpacity style={[styles.btnEsqueci, tecladoAberto && { marginBottom: 12 }]} onPress={() => notificar('aviso', 'Recuperação de senha', 'Solicite a redefinição à coordenação ou administração da instituição.')}>
             <Text style={[styles.textoEsqueci, { color: tema.botaoPrimario }]}>Esqueci minha senha</Text>
           </TouchableOpacity>
 
@@ -277,9 +305,11 @@ export default function LoginScreen() {
             <Text style={[styles.textoBtnEntrar, { color: tema.textoBotao }]}>{carregando ? 'Entrando...' : 'Entrar'}</Text>
           </TouchableOpacity>
 
-          <View style={styles.rodapeContainer}>
-            <Text style={[styles.rodape, { color: tema.textoSecundario }]}>Plataforma Violeta ©</Text>
-          </View>
+          {!tecladoAberto && (
+            <View style={[styles.rodapeContainer, { paddingBottom: Math.max(12, bottomInset) }]}>
+              <Text style={[styles.rodape, { color: tema.textoSecundario }]}>Plataforma Violeta ©</Text>
+            </View>
+          )}
         </View>
       </Animated.View>
 

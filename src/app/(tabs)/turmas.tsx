@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import {View,Text,StyleSheet,FlatList,TouchableOpacity,TextInput,KeyboardAvoidingView,Platform,RefreshControl,ActivityIndicator,Modal,ScrollView, useWindowDimensions,} from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Keyboard, KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator, Modal, ScrollView, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -52,7 +52,8 @@ export default function TurmasScreen() {
   const isTelaPequena = width < 380;
   const paddingLateral = isTelaPequena ? 16 : 20;
   const paddingTopo = Platform.OS === 'web' ? 24 : Math.max(insets.top + 12, 24);
-  const paddingBaseModal = Platform.OS === 'web' ? 24 : Math.max(insets.bottom + 14, 24);
+  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
+  const paddingBaseModal = Platform.OS === 'web' ? 24 : Math.max(bottomInset + 14, 24);
 
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isAdmin = perfil === 'admin';
@@ -60,6 +61,7 @@ export default function TurmasScreen() {
   const isProf = perfil === 'professor';
 
   // === ESTADOS ===
+  const [alturaTeclado, setAlturaTeclado] = useState(0);
   const [busca, setBusca] = useState('');
   const [turnoFiltro, setTurnoFiltro] = useState<(typeof FILTROS_TURNO)[number]>('Todos');
   const [diaFiltroProf, setDiaFiltroProf] = useState<FiltroDiaProf>('todos');
@@ -99,6 +101,22 @@ export default function TurmasScreen() {
 
   const voltar = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
   const toggleTurma = (id: string) => setTurmasExpandidas(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+
+  // === AJUSTE DO TECLADO EM MODAIS ===
+  useEffect(() => {
+    const eventoMostrar = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const eventoEsconder = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const subShow = Keyboard.addListener(eventoMostrar, e => {
+      setAlturaTeclado(e.endCoordinates?.height || 0);
+    });
+    const subHide = Keyboard.addListener(eventoEsconder, () => {
+      setAlturaTeclado(0);
+    });
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
 
   // === CARREGAMENTO DE DADOS (FIRESTORE) ===
   const buscarDadosTurmas = useCallback(async () => {
@@ -297,6 +315,8 @@ export default function TurmasScreen() {
   }, [turmas, diaBusca, chamadasRealizadasHoje]);
 
   const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
+  const estiloOverlayTeclado = { paddingBottom: alturaTeclado > 0 ? alturaTeclado : 0 };
+  const estiloScrollModal = { padding: 20, paddingBottom: alturaTeclado > 0 ? 150 : paddingBaseModal };
 
   // === RENDERIZADORES POR PERFIL ===
   const renderPastaAdmin = ({ item }: { item: any }) => {
@@ -535,7 +555,8 @@ export default function TurmasScreen() {
           data={turmasFiltradas}
           keyExtractor={item => item.id}
           renderItem={isAdmin ? renderPastaAdmin : isCoord ? renderPastaCoord : renderTurmaDocente}
-          contentContainerStyle={[styles.listContent, { paddingHorizontal: paddingLateral }]}
+          contentContainerStyle={[styles.listContent, { paddingHorizontal: paddingLateral, paddingBottom: 40 + bottomInset }]}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosTurmas()} tintColor={tema.botaoPrimario} />}
           ListHeaderComponent={
@@ -600,8 +621,8 @@ export default function TurmasScreen() {
 
       {/* Modal: Lista de Alunos da Turma (Professor) */}
       <Modal visible={turmaAlunosModal !== null} transparent animationType="slide" onRequestClose={() => setTurmaAlunosModal(null)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda, paddingBottom: paddingBaseModal }]}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
+          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <View style={{ flex: 1, marginRight: 10 }}>
                 <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>{turmaAlunosModal?.nome || 'Turma'}</Text>
@@ -611,7 +632,7 @@ export default function TurmasScreen() {
               </View>
               <TouchableOpacity onPress={() => setTurmaAlunosModal(null)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <ScrollView contentContainerStyle={estiloScrollModal} showsVerticalScrollIndicator={false}>
               {turmaAlunosModal && obterAlunosDaTurma(turmaAlunosModal).length === 0 ? (
                 <View style={{ alignItems: 'center', paddingVertical: 30 }}>
                   <Ionicons name="people-outline" size={38} color={tema.textoSecundario} />
@@ -638,13 +659,13 @@ export default function TurmasScreen() {
 
       {/* Modal: Filtros de Série e Turno (Coordenador) */}
       <Modal visible={modalFiltroCoord} transparent animationType="slide" onRequestClose={() => setModalFiltroCoord(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda, paddingBottom: paddingBaseModal }]}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
+          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Filtrar Turmas</Text>
               <TouchableOpacity onPress={() => setModalFiltroCoord(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <ScrollView contentContainerStyle={estiloScrollModal} showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Turno</Text>
               <View style={styles.linhaTurnosModal}>
                 {FILTROS_TURNO.map(t => {
@@ -721,13 +742,13 @@ export default function TurmasScreen() {
 
       {/* Modal: Criar / Editar Turma (Admin) */}
       <Modal visible={modalFormTurma} transparent animationType="slide" onRequestClose={() => setModalFormTurma(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda, paddingBottom: paddingBaseModal }]}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
+          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>{turmaEditandoId ? 'Editar Turma' : 'Nova Turma'}</Text>
               <TouchableOpacity onPress={() => setModalFormTurma(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Nome da Turma / Série</Text>
               <TextInput value={formTurma.nome} onChangeText={v => setFormTurma(prev => ({ ...prev, nome: v }))} placeholder="Ex: 6º Ano A" placeholderTextColor={tema.textoSecundario} style={[styles.inputModal, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]} />
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Turno</Text>
@@ -758,14 +779,14 @@ export default function TurmasScreen() {
 
       {/* Modal: Transferir Aluno (Coordenador) */}
       <Modal visible={alunoTransferir !== null} transparent animationType="slide" onRequestClose={() => setAlunoTransferir(null)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda, paddingBottom: paddingBaseModal }]}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
+          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Transferir Aluno</Text>
               <TouchableOpacity onPress={() => setAlunoTransferir(null)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
             {alunoTransferir && (
-              <ScrollView contentContainerStyle={{ padding: 20 }}>
+              <ScrollView contentContainerStyle={estiloScrollModal} showsVerticalScrollIndicator={false}>
                 <Text style={{ color: tema.textoPrincipal, fontSize: 15, fontWeight: '700', marginBottom: 4 }}>{alunoTransferir.aluno.nome}</Text>
                 <Text style={{ color: tema.textoSecundario, fontSize: 12, marginBottom: 16 }}>Sala atual: {alunoTransferir.turmaOrigem.nome} ({alunoTransferir.turmaOrigem.turno || 'Matutino'})</Text>
                 <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Selecione a nova sala *</Text>

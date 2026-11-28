@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useWindowDimensions, Modal, FlatList, RefreshControl, ActivityIndicator, TextInput, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useWindowDimensions, Modal, FlatList, RefreshControl, ActivityIndicator, TextInput, Platform, Image, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { collection, getDocs, addDoc, setDoc, updateDoc, doc, increment, query, where, serverTimestamp } from 'firebase/firestore';
 import { useDemoProfile, type DemoProfile } from '../../contexts/demoProfileContext';
 import { auth, db, criarContaAuthSemDeslogar } from '../../config/firebase';
@@ -76,6 +77,7 @@ const getDataDeHoje = () => new Date().toISOString().split('T')[0];
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { perfil, perfilReal, usuarioLogado, temaAtivo: tema } = useDemoProfile();
   const { width: larguraTela } = useWindowDimensions();
   const perfilDemo = {
@@ -83,8 +85,10 @@ export default function DashboardScreen() {
     ...(perfil === perfilReal && usuarioLogado ? { nome: usuarioLogado.nome } : {}),
   };
   const larguraColunaDia = Math.min(240, Math.max(190, larguraTela * 0.62));
+  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
 
   // === ESTADOS ===
+  const [alturaTeclado, setAlturaTeclado] = useState(0);
   const [saudacaoTempo, setSaudacaoTempo] = useState('Olá');
   const [fraseMotivacional, setFraseMotivacional] = useState(FRASES[0]);
   const [todasTurmas, setTodasTurmas] = useState<any[]>([]);
@@ -132,6 +136,22 @@ export default function DashboardScreen() {
   const diaAtual = new Date().getDay();
   const diaBusca = diaAtual === 0 || diaAtual === 6 ? 1 : diaAtual;
   const marcarTodasComoLidas = () => setNotificacoesLidasIds(comunicados.map(c => c.id));
+
+  // === AJUSTE DO TECLADO EM MODAIS ===
+  useEffect(() => {
+    const eventoMostrar = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const eventoEsconder = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const subShow = Keyboard.addListener(eventoMostrar, e => {
+      setAlturaTeclado(e.endCoordinates?.height || 0);
+    });
+    const subHide = Keyboard.addListener(eventoEsconder, () => {
+      setAlturaTeclado(0);
+    });
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
 
   // === SINCRONIZAÇÃO COM O FIRESTORE ===
   const buscarDadosDoFirebase = useCallback(async (manual = false) => {
@@ -477,12 +497,14 @@ export default function DashboardScreen() {
   ];
   const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
   const [fraseCitacao, fraseAutor] = fraseMotivacional.split(' - ');
+  const estiloOverlayTeclado = { paddingBottom: alturaTeclado > 0 ? alturaTeclado : 0 };
+  const estiloScrollModal = { padding: 20, paddingBottom: alturaTeclado > 0 ? 150 : 28 + bottomInset };
 
   // === INTERFACE ===
   return (
     <View style={[styles.container, { backgroundColor: tema.fundoBase }]}>
       <Image source={ICONE_VIOLETA} style={styles.bgWatermark} resizeMode="cover" pointerEvents="none" />
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosDoFirebase(true)} tintColor={tema.botaoPrimario} />}>
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 30 + bottomInset }]} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosDoFirebase(true)} tintColor={tema.botaoPrimario} />}>
         {/* Cabeçalho e Saudação */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
@@ -675,13 +697,13 @@ export default function DashboardScreen() {
 
       {/* Modal: Cadastrar Aluno (Coordenador) */}
       <Modal visible={modalAlunoCoord} transparent animationType="slide" onRequestClose={() => setModalAlunoCoord(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Cadastrar Aluno na Turma</Text>
               <TouchableOpacity onPress={() => setModalAlunoCoord(false)}><Ionicons name="close" size={24} color={tema.textoPrincipal} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }} keyboardShouldPersistTaps="handled">
+            <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.subSecaoModal, { color: tema.botaoPrimario }]}>1. Dados do Aluno</Text>
               <Text style={[styles.labelInput, { color: tema.textoPrincipal }]}>Nome Completo *</Text>
               <TextInput value={formAluno.nome} onChangeText={v => setFormAluno(prev => ({ ...prev, nome: v }))} placeholder="Ex: Lucas Andrade Souza" placeholderTextColor={tema.textoSecundario} style={[styles.input, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]} />
@@ -783,13 +805,13 @@ export default function DashboardScreen() {
 
       {/* Modal: Montar Grade de Aulas (Coordenador) */}
       <Modal visible={modalGradeCoord} transparent animationType="slide" onRequestClose={() => setModalGradeCoord(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Montar Grade de Aulas</Text>
               <TouchableOpacity onPress={() => setModalGradeCoord(false)}><Ionicons name="close" size={24} color={tema.textoPrincipal} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }} keyboardShouldPersistTaps="handled">
+            <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelInput, { color: tema.textoPrincipal }]}>Professor *</Text>
               <TouchableOpacity style={[styles.dropdownTrigger, { backgroundColor: tema.inputBackground, borderColor: dropdownProfAberto ? tema.botaoPrimario : tema.borda }]} onPress={() => { setDropdownProfAberto(!dropdownProfAberto); setDropdownTurmaGradeAberto(false); }}>
                 <Text style={{ color: formGrade.professorNome ? tema.textoPrincipal : tema.textoSecundario, fontSize: 14 }}>{formGrade.professorNome || 'Selecionar professor...'}</Text>
@@ -860,13 +882,13 @@ export default function DashboardScreen() {
 
       {/* Modal: Publicar Comunicado Oficial (Coordenador) */}
       <Modal visible={modalComunicadoCoord} transparent animationType="slide" onRequestClose={() => setModalComunicadoCoord(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Publicar Comunicado Oficial</Text>
               <TouchableOpacity onPress={() => setModalComunicadoCoord(false)}><Ionicons name="close" size={24} color={tema.textoPrincipal} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }} keyboardShouldPersistTaps="handled">
+            <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelInput, { color: tema.textoPrincipal }]}>Destinatário</Text>
               <TouchableOpacity style={[styles.dropdownTrigger, { backgroundColor: tema.inputBackground, borderColor: dropdownDestinatarioAberto ? tema.botaoPrimario : tema.borda }]} onPress={() => setDropdownDestinatarioAberto(!dropdownDestinatarioAberto)} activeOpacity={0.75}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -903,13 +925,13 @@ export default function DashboardScreen() {
 
       {/* Modal: Alertas Pedagógicos (Coordenador) */}
       <Modal visible={modalAlertasCoord} transparent animationType="slide" onRequestClose={() => setModalAlertasCoord(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Alertas Pedagógicos</Text>
               <TouchableOpacity onPress={() => setModalAlertasCoord(false)}><Ionicons name="close" size={24} color={tema.textoPrincipal} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <ScrollView contentContainerStyle={estiloScrollModal} showsVerticalScrollIndicator={false}>
               {totalAlertasCoord === 0 ? (
                 <View style={{ alignItems: 'center', paddingVertical: 30 }}>
                   <Ionicons name="checkmark-circle-outline" size={44} color="#2E7D32" />
@@ -955,13 +977,13 @@ export default function DashboardScreen() {
 
       {/* Modal: Cadastrar Novo Usuário (Admin) */}
       <Modal visible={modalUsuario} transparent animationType="slide" onRequestClose={() => setModalUsuario(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Cadastrar Novo Usuário</Text>
               <TouchableOpacity onPress={() => setModalUsuario(false)}><Ionicons name="close" size={24} color={tema.textoPrincipal} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelInput, { color: tema.textoPrincipal }]}>Nome Completo</Text>
               <TextInput value={formUser.nome} onChangeText={v => setFormUser({ ...formUser, nome: v })} placeholder="Ex: Carlos Eduardo Silva" placeholderTextColor={tema.textoSecundario} style={[styles.input, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]} />
               <Text style={[styles.labelInput, { color: tema.textoPrincipal }]}>E-mail Institucional</Text>
@@ -1002,13 +1024,13 @@ export default function DashboardScreen() {
 
       {/* Modal: Cadastrar Nova Turma (Admin) */}
       <Modal visible={modalTurma} transparent animationType="slide" onRequestClose={() => setModalTurma(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Cadastrar Nova Turma</Text>
               <TouchableOpacity onPress={() => setModalTurma(false)}><Ionicons name="close" size={24} color={tema.textoPrincipal} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelInput, { color: tema.textoPrincipal }]}>Nome da Turma / Série</Text>
               <TextInput value={formTurma.nome} onChangeText={v => setFormTurma({ ...formTurma, nome: v })} placeholder="Ex: 1º Ano Médio, 7º Ano B..." placeholderTextColor={tema.textoSecundario} style={[styles.input, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]} />
               <Text style={[styles.labelInput, { color: tema.textoPrincipal }]}>Turno</Text>
@@ -1033,7 +1055,7 @@ export default function DashboardScreen() {
 
       {/* Modal: Comunicados e Avisos */}
       <Modal visible={modalNotificacoes} transparent animationType="fade" onRequestClose={() => setModalNotificacoes(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setModalNotificacoes(false)}>
+        <TouchableOpacity style={[styles.modalOverlay, estiloOverlayTeclado]} activeOpacity={1} onPress={() => setModalNotificacoes(false)}>
           <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: tema.fundoBase }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Comunicados e Avisos</Text>
@@ -1044,7 +1066,7 @@ export default function DashboardScreen() {
             <FlatList
               data={comunicados}
               keyExtractor={item => item.id}
-              contentContainerStyle={{ padding: 20 }}
+              contentContainerStyle={{ padding: 20, paddingBottom: 28 + bottomInset }}
               ListEmptyComponent={
                 <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                   <Ionicons name="notifications-off-outline" size={38} color={tema.textoSecundario} />

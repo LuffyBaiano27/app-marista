@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
 import { useDemoProfile } from '../contexts/demoProfileContext';
 import { db } from '../config/firebase';
@@ -30,12 +31,15 @@ const getDataDeHoje = () => new Date().toISOString().split('T')[0];
 
 export default function ChamadaScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
   const aulaId = String(id || '');
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isAdmin = perfil === 'admin';
+  const bottomInset = Platform.OS === 'web' ? 0 : Math.max(insets.bottom, 16);
 
   // === ESTADOS ===
+  const [alturaTeclado, setAlturaTeclado] = useState(0);
   const [aulaInfo, setAulaInfo] = useState<any>(null);
   const [alunos, setAlunos] = useState<AlunoChamada[]>([]);
   const [conteudoMinistrado, setConteudoMinistrado] = useState('');
@@ -52,6 +56,22 @@ export default function ChamadaScreen() {
     setFeedback({ visivel: true, tipo, titulo, mensagem });
   }, []);
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
+
+  // === AJUSTE DO TECLADO ===
+  useEffect(() => {
+    const eventoMostrar = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const eventoEsconder = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const subShow = Keyboard.addListener(eventoMostrar, e => {
+      setAlturaTeclado(e.endCoordinates?.height || 0);
+    });
+    const subHide = Keyboard.addListener(eventoEsconder, () => {
+      setAlturaTeclado(0);
+    });
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
 
   // === CARREGAMENTO DO DIÁRIO (FIRESTORE) ===
   const buscarDadosChamada = useCallback(async () => {
@@ -177,6 +197,7 @@ export default function ChamadaScreen() {
   };
 
   const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
+  const paddingListaBase = (!chamadaConcluida ? 130 : 40) + bottomInset;
 
   // === RENDERIZADOR DE ALUNO ===
   const renderAluno = ({ item }: { item: AlunoChamada }) => {
@@ -273,7 +294,8 @@ export default function ChamadaScreen() {
           data={alunosFiltrados}
           keyExtractor={item => item.id}
           renderItem={renderAluno}
-          contentContainerStyle={[styles.listContent, !chamadaConcluida && { paddingBottom: 115 }]}
+          contentContainerStyle={[styles.listContent, { paddingBottom: alturaTeclado > 0 ? Math.max(paddingListaBase, alturaTeclado + 40) : paddingListaBase }]}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosChamada()} tintColor={tema.botaoPrimario} />}
           ListHeaderComponent={
@@ -317,7 +339,7 @@ export default function ChamadaScreen() {
 
       {/* Rodapé Fixo de Assinatura */}
       {!chamadaConcluida && !carregando && alunos.length > 0 && (
-        <View style={[styles.rodapeFixo, { backgroundColor: tema.fundoTopo, borderTopColor: tema.borda }]}>
+        <View style={[styles.rodapeFixo, { backgroundColor: tema.fundoTopo, borderTopColor: tema.borda, paddingBottom: 14 + bottomInset }]}>
           <View style={{ flex: 1 }}>
             <Text style={{ color: tema.textoLogo, fontSize: 13, fontWeight: '700' }}>{resumo.presentes} presente(s) • {resumo.faltas} falta(s)</Text>
             <Text style={{ color: tema.textoLogo, fontSize: 11, opacity: 0.75 }}>Pronto para assinatura digital</Text>
@@ -331,7 +353,7 @@ export default function ChamadaScreen() {
 
       {/* Modal: Assinatura Eletrônica */}
       <Modal visible={modalAssinatura} transparent animationType="fade" onRequestClose={() => setModalAssinatura(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { paddingBottom: alturaTeclado > 0 ? alturaTeclado : 20 }]}>
           <View style={[styles.modalCardCentro, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

@@ -1,7 +1,8 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Keyboard, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { signOut } from 'firebase/auth';
 import { collection, getDoc, getDocs, addDoc, setDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { useDemoProfile, type ModoTema } from '../../contexts/demoProfileContext';
@@ -43,11 +44,14 @@ const esperar = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 export default function PerfilScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { perfil, setPerfil, perfilReal, setPerfilReal, usuarioLogado, setUsuarioLogado, modoTema, setModoTema, temaAtivo: tema } = useDemoProfile();
   const identidade = perfil === perfilReal && usuarioLogado ? usuarioLogado : IDENTIDADES_DEMO[perfil];
   const usuario = { ...identidade, cargo: NOMES_PERFIS[perfil] };
+  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
 
   // === ESTADOS (MODAIS, CONTA, INSTITUIÇÃO E FERRAMENTAS) ===
+  const [alturaTeclado, setAlturaTeclado] = useState(0);
   const [modalDados, setModalDados] = useState(false);
   const [modalPrivacidade, setModalPrivacidade] = useState(false);
   const [modalSessoes, setModalSessoes] = useState(false);
@@ -99,6 +103,22 @@ export default function PerfilScreen() {
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
   const voltar = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
 
+  // === AJUSTE DO TECLADO EM MODAIS ===
+  useEffect(() => {
+    const eventoMostrar = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const eventoEsconder = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const subShow = Keyboard.addListener(eventoMostrar, e => {
+      setAlturaTeclado(e.endCoordinates?.height || 0);
+    });
+    const subHide = Keyboard.addListener(eventoEsconder, () => {
+      setAlturaTeclado(0);
+    });
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
+
   // === SINCRONIZAÇÃO DE CONFIGURAÇÕES ===
   const carregarConfigInstituicao = useCallback(async () => {
     try {
@@ -119,19 +139,23 @@ export default function PerfilScreen() {
 
   // === AÇÕES DE CONTA, SESSÕES E COMUNICADOS ===
   const confirmarLogout = async () => {
+    if (saindo) return;
     setSaindo(true);
     try {
       await signOut(auth);
     } catch {
       // segue para a tela de login mesmo se já estiver desconectado
-    } finally {
-      setModalLogout(false);
-      setUsuarioLogado(null);
-      setPerfil('admin');
-      setPerfilReal('admin');
-      setSaindo(false);
-      router.replace('/');
     }
+    setModalLogout(false);
+    await esperar(60);
+    if (router.canDismiss()) {
+      router.dismissAll();
+    }
+    router.replace('/');
+    setUsuarioLogado(null);
+    setPerfil('admin');
+    setPerfilReal('admin');
+    setSaindo(false);
   };
 
   const handleSalvarDados = () => {
@@ -431,6 +455,9 @@ export default function PerfilScreen() {
   };
 
   const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
+  const estiloModalFullTeclado = { paddingTop: 40, paddingBottom: alturaTeclado > 0 ? alturaTeclado : 0 };
+  const estiloModalHalfTeclado = { paddingBottom: alturaTeclado > 0 ? alturaTeclado : 0 };
+  const estiloBodyModal = { padding: 20, paddingBottom: (alturaTeclado > 0 ? 150 : 28) + bottomInset };
 
   // === COMPONENTE AUXILIAR DE MENU ===
   const MenuOption = ({ icone, titulo, subtitulo = null, corIcone = tema.textoSecundario, danger = false, onPress, desativado = false }: any) => (
@@ -449,7 +476,7 @@ export default function PerfilScreen() {
   // === INTERFACE ===
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView style={[styles.container, { backgroundColor: tema.fundoBase }]} showsVerticalScrollIndicator={false}>
+      <ScrollView style={[styles.container, { backgroundColor: tema.fundoBase }]} contentContainerStyle={{ paddingBottom: 40 + bottomInset }} showsVerticalScrollIndicator={false}>
         {/* Cabeçalho do Perfil com Marca d'água VIOLETA */}
         <View style={[styles.header, { backgroundColor: tema.fundoTopo, overflow: 'hidden' }]}>
           <Image source={ICONE_VIOLETA} style={styles.headerWatermark} resizeMode="cover" pointerEvents="none" />
@@ -581,7 +608,7 @@ export default function PerfilScreen() {
                 <TouchableOpacity onPress={() => setModalSessoes(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
               </View>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 18 }}>
+            <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 24 + bottomInset }}>
               {sessoes.map(s => (
                 <View key={s.id} style={[styles.cardSessao, { borderColor: tema.borda, backgroundColor: tema.inputBackground, marginBottom: 10, justifyContent: 'space-between' }]}>
                   <View style={{ flex: 1, marginRight: 10 }}>
@@ -633,7 +660,7 @@ export default function PerfilScreen() {
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal, fontSize: tamFonte(18) }]}>Diagnóstico de Integridade</Text>
               <TouchableOpacity onPress={() => setModalIntegridade(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 24 + bottomInset }}>
               {etapasIntegridade.map(etapa => (
                 <View key={etapa.id} style={[styles.linhaEtapa, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
                   <View style={{ marginRight: 12, marginTop: 2 }}>
@@ -670,7 +697,7 @@ export default function PerfilScreen() {
 
       {/* Modal: Dados da Instituição / Calendário */}
       <Modal visible={modalInstituicao} transparent animationType="slide" onRequestClose={() => setModalInstituicao(false)}>
-        <View style={styles.modalOverlayFull}>
+        <View style={[styles.modalOverlayFull, estiloModalFullTeclado]}>
           <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal, fontSize: tamFonte(18) }]}>
@@ -678,7 +705,7 @@ export default function PerfilScreen() {
               </Text>
               <TouchableOpacity onPress={() => setModalInstituicao(false)} style={styles.btnFecharModal}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+            <ScrollView style={styles.modalBody} contentContainerStyle={estiloBodyModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               {perfil === 'admin' && (
                 <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
                   {(['calendario', 'infra'] as const).map(aba => {
@@ -739,13 +766,13 @@ export default function PerfilScreen() {
 
       {/* Modal: Meus Dados */}
       <Modal visible={modalDados} transparent animationType="slide">
-        <View style={styles.modalOverlayFull}>
+        <View style={[styles.modalOverlayFull, estiloModalFullTeclado]}>
           <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal, fontSize: tamFonte(18) }]}>Meus Dados</Text>
               <TouchableOpacity onPress={() => setModalDados(false)} style={styles.btnFecharModal}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody}>
+            <ScrollView style={styles.modalBody} contentContainerStyle={estiloBodyModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <View style={styles.avatarEdicaoContainer}>
                 <View style={styles.avatarEdicao}><Text style={[styles.avatarText, { color: tema.botaoPrimario }]}>{usuario.iniciais}</Text></View>
                 <TouchableOpacity style={[styles.btnAlterarFoto, { backgroundColor: tema.botaoPrimario }]}><Ionicons name="camera" size={16} color={tema.textoBotao} /></TouchableOpacity>
@@ -770,13 +797,13 @@ export default function PerfilScreen() {
 
       {/* Modal: Segurança e Preferências */}
       <Modal visible={modalPrivacidade} transparent animationType="slide">
-        <View style={styles.modalOverlayFull}>
+        <View style={[styles.modalOverlayFull, estiloModalFullTeclado]}>
           <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal, fontSize: tamFonte(18) }]}>Segurança e Preferências</Text>
               <TouchableOpacity onPress={() => setModalPrivacidade(false)} style={styles.btnFecharModal}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+            <ScrollView style={styles.modalBody} contentContainerStyle={estiloBodyModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.topicoSeguranca, { color: tema.botaoPrimario, fontSize: tamFonte(13) }]}>Alterar Senha</Text>
               <Text style={[styles.avisoSenha, { color: tema.textoSecundario, fontSize: tamFonte(12) }]}>Alterar senha irá desconectar todas as sessões, sendo necessário realizar login novamente.</Text>
               <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14) }]} placeholder="Senha Atual" secureTextEntry placeholderTextColor={tema.textoSecundario} value={senhaAtual} onChangeText={setSenhaAtual} />
@@ -836,18 +863,18 @@ export default function PerfilScreen() {
 
       {/* Modal: Abrir Chamado Técnico */}
       <Modal visible={modalAjuda} transparent animationType="slide">
-        <TouchableOpacity style={styles.modalOverlayHalf} activeOpacity={1} onPress={() => setModalAjuda(false)}>
+        <TouchableOpacity style={[styles.modalOverlayHalf, estiloModalHalfTeclado]} activeOpacity={1} onPress={() => setModalAjuda(false)}>
           <TouchableOpacity activeOpacity={1} style={[styles.modalContentHalf, { backgroundColor: tema.fundoBase }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal, fontSize: tamFonte(18) }]}>Abrir Chamado</Text>
               <TouchableOpacity onPress={() => setModalAjuda(false)} style={styles.btnFecharModal}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <View style={styles.modalBody}>
+            <ScrollView style={styles.modalBody} contentContainerStyle={estiloBodyModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <TextInput style={[styles.inputArea, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14) }]} placeholder="Descreva o problema..." placeholderTextColor={tema.textoSecundario} multiline value={textoChamado} onChangeText={setTextoChamado} />
               <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: tema.botaoPrimario }]} onPress={() => void handleEnviarChamado()}>
                 <Text style={[styles.textoBtnLargo, { color: tema.textoBotao, fontSize: tamFonte(15) }]}>Enviar Ticket</Text>
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </TouchableOpacity>
           <FeedbackToast {...toastProps} />
         </TouchableOpacity>
@@ -855,19 +882,19 @@ export default function PerfilScreen() {
 
       {/* Modal: Novo Comunicado Oficial */}
       <Modal visible={modalAviso} transparent animationType="slide">
-        <TouchableOpacity style={styles.modalOverlayHalf} activeOpacity={1} onPress={() => setModalAviso(false)}>
+        <TouchableOpacity style={[styles.modalOverlayHalf, estiloModalHalfTeclado]} activeOpacity={1} onPress={() => setModalAviso(false)}>
           <TouchableOpacity activeOpacity={1} style={[styles.modalContentHalf, { backgroundColor: tema.fundoBase }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal, fontSize: tamFonte(18) }]}>Novo Comunicado</Text>
               <TouchableOpacity onPress={() => setModalAviso(false)} style={styles.btnFecharModal}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <View style={styles.modalBody}>
+            <ScrollView style={styles.modalBody} contentContainerStyle={estiloBodyModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14) }]} value={tituloAviso} onChangeText={setTituloAviso} placeholder="Título" placeholderTextColor={tema.textoSecundario} />
               <TextInput style={[styles.inputArea, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14), marginTop: 15 }]} multiline value={mensagemAviso} onChangeText={setMensagemAviso} placeholder="Mensagem" placeholderTextColor={tema.textoSecundario} />
               <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: '#E65100' }]} onPress={() => void handlePublicarAviso()} disabled={publicandoAviso}>
                 <Text style={[styles.textoBtnLargo, { fontSize: tamFonte(15) }]}>{publicandoAviso ? 'Publicando...' : 'Publicar Aviso'}</Text>
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </TouchableOpacity>
           <FeedbackToast {...toastProps} />
         </TouchableOpacity>
@@ -907,7 +934,8 @@ export default function PerfilScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { alignItems: 'center', paddingTop: 50, paddingBottom: 30, borderBottomLeftRadius: 30, borderBottomRightRadius: 30, elevation: 5 },
-  headerWatermark: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: 0.18 },  headerTopRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 10 },
+  headerWatermark: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: 0.18 },
+  headerTopRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 10 },
   btnVoltar: { padding: 5 },
   btnToggleCargo: { paddingHorizontal: 8, paddingVertical: 5, backgroundColor: 'rgba(124, 124, 255, 0.22)', borderWidth: 1, borderColor: 'rgba(165, 158, 196, 0.3)', borderRadius: 8 },
   avatarContainer: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
@@ -942,7 +970,7 @@ const styles = StyleSheet.create({
   modalOverlayFull: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', paddingTop: 40 },
   modalContentFull: { flex: 1, borderTopLeftRadius: 25, borderTopRightRadius: 25 },
   modalOverlayHalf: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalContentHalf: { borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingBottom: 40 },
+  modalContentHalf: { maxHeight: '88%', borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingBottom: 20 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1 },
   modalTitle: { fontSize: 18, fontWeight: 'bold' },
   btnFecharModal: { padding: 5 },

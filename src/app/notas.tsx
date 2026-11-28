@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { useDemoProfile } from '../contexts/demoProfileContext';
 import { db } from '../config/firebase';
@@ -34,10 +35,12 @@ const gerarDocIdNota = (turma: string, avaliacao: string, alunoId: string) =>
 
 export default function NotasScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isCoord = perfil === 'coordenador';
   const isProf = perfil === 'professor';
+  const bottomInset = Platform.OS === 'web' ? 0 : Math.max(insets.bottom, 16);
 
   const avaliacaoId = String(params.avaliacaoId || '');
   const tituloAvaliacao = String(params.avaliacao || 'Avaliação');
@@ -46,6 +49,7 @@ export default function NotasScreen() {
   const valorInicialParam = Number(params.valorMaximo) > 0 ? Number(params.valorMaximo) : 10;
 
   // === ESTADOS ===
+  const [alturaTeclado, setAlturaTeclado] = useState(0);
   const [valorMaximoProva, setValorMaximoProva] = useState<number>(valorInicialParam);
   const [periodoAberto, setPeriodoAberto] = useState(params.status === 'aberto');
   const [alunos, setAlunos] = useState<AlunoNotaItem[]>([]);
@@ -67,6 +71,22 @@ export default function NotasScreen() {
     setFeedback({ visivel: true, tipo, titulo, mensagem });
   }, []);
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
+
+  // === AJUSTE DO TECLADO ===
+  useEffect(() => {
+    const eventoMostrar = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const eventoEsconder = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const subShow = Keyboard.addListener(eventoMostrar, e => {
+      setAlturaTeclado(e.endCoordinates?.height || 0);
+    });
+    const subHide = Keyboard.addListener(eventoEsconder, () => {
+      setAlturaTeclado(0);
+    });
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
 
   // === CARREGAMENTO DE DADOS (FIRESTORE) ===
   const buscarNotasDoBanco = useCallback(async () => {
@@ -304,6 +324,7 @@ export default function NotasScreen() {
   }, [alunos, busca, isCoord, filtroCoord, valorMaximoProva]);
 
   const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
+  const paddingListaBase = (isProf && periodoAberto ? 130 : 40) + bottomInset;
 
   // === RENDERIZADOR DE ALUNO ===
   const renderAluno = ({ item }: { item: AlunoNotaItem }) => {
@@ -473,7 +494,8 @@ export default function NotasScreen() {
         data={alunosFiltrados}
         keyExtractor={item => item.id}
         renderItem={renderAluno}
-        contentContainerStyle={[styles.listContent, isProf && periodoAberto && { paddingBottom: 120 }]}
+        contentContainerStyle={[styles.listContent, { paddingBottom: alturaTeclado > 0 ? Math.max(paddingListaBase, alturaTeclado + 40) : paddingListaBase }]}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarNotasDoBanco()} tintColor={tema.botaoPrimario} />}
         ListHeaderComponent={
@@ -526,7 +548,7 @@ export default function NotasScreen() {
 
       {/* Rodapé Fixo de Rascunho e Lançamento (Professor) */}
       {isProf && periodoAberto && alunos.length > 0 && (
-        <View style={[styles.rodapeFixoProf, { backgroundColor: tema.fundoTopo, borderTopColor: tema.borda }]}>
+        <View style={[styles.rodapeFixoProf, { backgroundColor: tema.fundoTopo, borderTopColor: tema.borda, paddingBottom: 12 + bottomInset }]}>
           <View style={styles.infoRodapeProf}>
             <Text style={{ color: tema.textoLogo, fontSize: 13, fontWeight: '700' }}>{kpis.totalLancadas} de {alunos.length} preenchidas</Text>
             <Text style={{ color: tema.textoLogo, fontSize: 11, opacity: 0.78 }} numberOfLines={1}>{statusRascunhoTexto}</Text>
@@ -546,7 +568,7 @@ export default function NotasScreen() {
 
       {/* Modal: Assinar e Lançar Notas */}
       <Modal visible={modalConfirmarNotas} transparent animationType="fade" onRequestClose={() => setModalConfirmarNotas(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { paddingBottom: alturaTeclado > 0 ? alturaTeclado : 20 }]}>
           <View style={[styles.modalCardCentro, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

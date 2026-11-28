@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addDoc, collection, deleteDoc, doc, getDocs, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
@@ -65,11 +66,14 @@ const gerarSenhaPadrao = (nome: string, cpf?: string, senhaSalva?: string) => {
 
 export default function UsuariosScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isAdmin = perfil === 'admin';
   const isCoord = perfil === 'coordenador';
+  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
 
   // === ESTADOS ===
+  const [alturaTeclado, setAlturaTeclado] = useState(0);
   const [usuarios, setUsuarios] = useState<UsuarioItem[]>([]);
   const [gradeAulas, setGradeAulas] = useState<AulaGradeItem[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -98,6 +102,22 @@ export default function UsuariosScreen() {
   }, []);
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
   const voltar = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
+
+  // === AJUSTE DO TECLADO EM MODAIS ===
+  useEffect(() => {
+    const eventoMostrar = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const eventoEsconder = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const subShow = Keyboard.addListener(eventoMostrar, e => {
+      setAlturaTeclado(e.endCoordinates?.height || 0);
+    });
+    const subHide = Keyboard.addListener(eventoEsconder, () => {
+      setAlturaTeclado(0);
+    });
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
 
   // === CARREGAMENTO DE DADOS (FIRESTORE) ===
   const buscarUsuarios = useCallback(async () => {
@@ -321,6 +341,8 @@ export default function UsuariosScreen() {
   const temFiltroAtivoCoord = situacaoFiltro !== 'Todas' || diaFiltroCoord !== 0 || turnoFiltroCoord !== 'Todos';
   const limparFiltrosCoord = () => { setSituacaoFiltro('Todas'); setDiaFiltroCoord(0); setTurnoFiltroCoord('Todos'); };
   const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
+  const estiloOverlayTeclado = { paddingBottom: alturaTeclado > 0 ? alturaTeclado : 0 };
+  const estiloScrollModal = { padding: 20, paddingBottom: alturaTeclado > 0 ? 150 : 28 + bottomInset };
 
   // === RENDERIZADORES ===
   const renderUsuario = ({ item }: { item: UsuarioItem }) => {
@@ -493,8 +515,9 @@ export default function UsuariosScreen() {
         data={usuariosFiltrados}
         keyExtractor={item => item.id}
         renderItem={isCoord ? renderPastaProfessorCoord : renderUsuario}
-        contentContainerStyle={styles.listaUsuarios}
+        contentContainerStyle={[styles.listaUsuarios, { paddingBottom: 32 + bottomInset }]}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarUsuarios()} tintColor={tema.botaoPrimario} />}
         ListEmptyComponent={
           carregando
@@ -505,13 +528,13 @@ export default function UsuariosScreen() {
 
       {/* Modal: Filtros da Coordenação */}
       <Modal visible={modalFiltroCoord} transparent animationType="slide" onRequestClose={() => setModalFiltroCoord(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Filtrar Professores e Grade</Text>
               <TouchableOpacity onPress={() => setModalFiltroCoord(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={styles.detalhesUsuario}>
+            <ScrollView contentContainerStyle={estiloScrollModal} showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Situação do Professor</Text>
               <View style={styles.linhaCargos}>
                 {FILTROS_SITUACAO.map(s => {
@@ -560,13 +583,13 @@ export default function UsuariosScreen() {
 
       {/* Modal: Cadastrar Professor (Coordenação) */}
       <Modal visible={modalNovoProf} transparent animationType="slide" onRequestClose={() => setModalNovoProf(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Cadastrar Professor</Text>
               <TouchableOpacity onPress={() => setModalNovoProf(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={styles.detalhesUsuario} keyboardShouldPersistTaps="handled">
+            <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Nome Completo *</Text>
               <TextInput value={formNovoProf.nome} onChangeText={v => setFormNovoProf(prev => ({ ...prev, nome: v }))} placeholder="Ex: Rafael Nunes" placeholderTextColor={tema.textoSecundario} style={[styles.inputModal, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]} />
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Disciplina / Matéria *</Text>
@@ -594,7 +617,7 @@ export default function UsuariosScreen() {
 
       {/* Modal: Detalhes e Edição de Usuário */}
       <Modal visible={selecionado !== null} transparent animationType="slide" onRequestClose={fecharModal}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>{editando ? 'Editar usuário' : 'Dados do usuário'}</Text>
@@ -603,7 +626,7 @@ export default function UsuariosScreen() {
               </TouchableOpacity>
             </View>
             {selecionado && (
-              <ScrollView contentContainerStyle={styles.detalhesUsuario} keyboardShouldPersistTaps="handled">
+              <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                 {editando ? (
                   <>
                     <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Nome</Text>
@@ -722,7 +745,7 @@ const styles = StyleSheet.create({
   pillTurnoAula: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   listaVazia: { textAlign: 'center', marginTop: 30, fontSize: 14 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  modalConteudo: { maxHeight: '88%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, paddingBottom: 24 },
+  modalConteudo: { maxHeight: '88%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1 },
   modalTitulo: { fontSize: 18, fontWeight: 'bold' },
   detalhesUsuario: { padding: 20 },

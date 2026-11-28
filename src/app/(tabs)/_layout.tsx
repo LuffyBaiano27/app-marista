@@ -21,22 +21,20 @@ export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const [autenticado, setAutenticado] = useState(Boolean(auth.currentUser));
+  const [checagemConcluida, setChecagemConcluida] = useState(false);
   const isEscuro = tema.fundoBase !== '#FFFFFF';
-  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
+  const bottomInset = Platform.OS === 'web' ? 0 : Math.max(insets.bottom, 8);
   const corFundoBarra = isEscuro ? tema.fundoTopo : tema.fundoBase;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, user => {
       setAutenticado(Boolean(user));
+      setChecagemConcluida(true);
     });
     return unsubscribe;
   }, []);
 
-  if (!autenticado) {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.location.replace('/');
-      return null;
-    }
+  if (checagemConcluida && !autenticado) {
     return <Redirect href="/" />;
   }
 

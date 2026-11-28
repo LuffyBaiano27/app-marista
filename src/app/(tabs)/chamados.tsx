@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator, Modal, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Keyboard, KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator, Modal, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { collection, getDocs, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
@@ -46,10 +47,13 @@ const formatarDataHora = (valor: any, dataFallback?: string, horaFallback?: stri
 
 export default function ChamadosScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isAdmin = perfil === 'admin';
+  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
 
   // === ESTADOS ===
+  const [alturaTeclado, setAlturaTeclado] = useState(0);
   const [chamados, setChamados] = useState<ChamadoItem[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -72,6 +76,22 @@ export default function ChamadosScreen() {
     em_andamento: { label: 'EM ANDAMENTO', cor: tema.botaoPrimario, icone: 'time' },
     resolvido: { label: 'RESOLVIDO', cor: '#2E7D32', icone: 'checkmark-circle' },
   }), [tema.botaoPrimario]);
+
+  // === AJUSTE DO TECLADO EM MODAIS ===
+  useEffect(() => {
+    const eventoMostrar = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const eventoEsconder = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const subShow = Keyboard.addListener(eventoMostrar, e => {
+      setAlturaTeclado(e.endCoordinates?.height || 0);
+    });
+    const subHide = Keyboard.addListener(eventoEsconder, () => {
+      setAlturaTeclado(0);
+    });
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
 
   // === CARREGAMENTO E AÇÕES (FIRESTORE) ===
   const buscarChamados = useCallback(async () => {
@@ -186,6 +206,8 @@ export default function ChamadosScreen() {
   ]), [chamados, tema.botaoPrimario]);
 
   const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
+  const estiloOverlayTeclado = { paddingBottom: alturaTeclado > 0 ? alturaTeclado : 0 };
+  const estiloScrollModal = { padding: 20, paddingBottom: alturaTeclado > 0 ? 150 : 28 + bottomInset };
 
   // === RENDERIZADORES ===
   const renderChamado = ({ item }: { item: ChamadoItem }) => {
@@ -259,7 +281,7 @@ export default function ChamadosScreen() {
           data={chamadosFiltrados}
           keyExtractor={item => item.id}
           renderItem={renderChamado}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingBottom: 40 + bottomInset }]}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarChamados()} tintColor={tema.botaoPrimario} />}
           ListHeaderComponent={
@@ -284,14 +306,14 @@ export default function ChamadosScreen() {
 
       {/* Modal: Detalhes e Auditoria */}
       <Modal visible={selecionado !== null} transparent animationType="slide" onRequestClose={() => setSelecionado(null)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Detalhes do Chamado</Text>
               <TouchableOpacity onPress={() => setSelecionado(null)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
             {selecionado && (
-              <ScrollView contentContainerStyle={{ padding: 20 }} keyboardShouldPersistTaps="handled">
+              <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                 <View style={styles.linhaStatusModal}>
                   <View style={[styles.badgeStatus, { backgroundColor: configStatus[selecionado.status].cor + '20' }]}>
                     <Text style={[styles.textoBadge, { color: configStatus[selecionado.status].cor }]}>{configStatus[selecionado.status].label}</Text>
@@ -352,13 +374,13 @@ export default function ChamadosScreen() {
 
       {/* Modal: Abrir Novo Chamado */}
       <Modal visible={modalNovo} transparent animationType="slide" onRequestClose={() => setModalNovo(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, estiloOverlayTeclado]}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Abrir Novo Chamado</Text>
               <TouchableOpacity onPress={() => setModalNovo(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20 }} keyboardShouldPersistTaps="handled">
+            <ScrollView contentContainerStyle={estiloScrollModal} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Categoria</Text>
               <View style={styles.gridCategorias}>
                 {CATEGORIAS.map(cat => {
@@ -420,7 +442,7 @@ const styles = StyleSheet.create({
   metaCard: { fontSize: 12, fontWeight: '500' },
   metaData: { fontSize: 11, fontStyle: 'italic' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  modalConteudo: { maxHeight: '88%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, paddingBottom: 24 },
+  modalConteudo: { maxHeight: '88%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1 },
   modalTitulo: { fontSize: 18, fontWeight: 'bold' },
   linhaStatusModal: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
