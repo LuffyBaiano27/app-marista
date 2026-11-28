@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
-import { Tabs, useRouter } from 'expo-router';
+import { Platform, View } from 'react-native';
+import { Redirect, Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../config/firebase';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
@@ -17,28 +18,27 @@ const CONFIGURACAO_ABAS = {
 };
 
 export default function TabLayout() {
-  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const [autenticado, setAutenticado] = useState(Boolean(auth.currentUser));
   const isEscuro = tema.fundoBase !== '#FFFFFF';
+  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
+  const corFundoBarra = isEscuro ? tema.fundoTopo : tema.fundoBase;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, user => {
-      if (!user) {
-        setAutenticado(false);
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.location.replace('/');
-        } else {
-          router.replace('/');
-        }
-      } else {
-        setAutenticado(true);
-      }
+      setAutenticado(Boolean(user));
     });
     return unsubscribe;
-  }, [router]);
+  }, []);
 
-  if (!autenticado) return null;
+  if (!autenticado) {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.replace('/');
+      return null;
+    }
+    return <Redirect href="/" />;
+  }
 
   const ordemAbas = perfil === 'admin'
     ? ['index', 'usuarios', 'turmas', 'chamados', 'historico', 'avaliacoes', 'perfil'] as const
@@ -53,12 +53,15 @@ export default function TabLayout() {
           fontSize: 11,
           fontWeight: '700',
         },
+        tabBarBackground: () => (
+          <View style={{ flex: 1, backgroundColor: corFundoBarra }} />
+        ),
         tabBarStyle: {
-          backgroundColor: isEscuro ? tema.fundoTopo : tema.fundoBase,
+          backgroundColor: corFundoBarra,
           borderTopColor: tema.borda,
           borderTopWidth: 1,
-          height: 64,
-          paddingBottom: 10,
+          height: 64 + bottomInset,
+          paddingBottom: 10 + bottomInset,
           paddingTop: 6,
           elevation: 8,
         },

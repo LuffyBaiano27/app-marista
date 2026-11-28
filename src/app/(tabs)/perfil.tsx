@@ -347,8 +347,8 @@ export default function PerfilScreen() {
       return `Backup ${nomeArquivo} baixado no navegador.`;
     }
     try {
-      const FileSystem: any = await import(/* webpackIgnore: true */ 'expo-file-system');
-      const Sharing: any = await import(/* webpackIgnore: true */ 'expo-sharing');
+      const FileSystem: any = require('expo-file-system');
+      const Sharing: any = require('expo-sharing');
       const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
       if (!baseDir) return `Pacote preparado em memória (${resumoFallback}).`;
       const destino = `${baseDir}${nomeArquivo}`;

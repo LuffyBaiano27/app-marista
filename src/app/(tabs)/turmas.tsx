@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator, Modal, ScrollView } from 'react-native';
+import {View,Text,StyleSheet,FlatList,TouchableOpacity,TextInput,KeyboardAvoidingView,Platform,RefreshControl,ActivityIndicator,Modal,ScrollView, useWindowDimensions,} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, increment, query, where, serverTimestamp } from 'firebase/firestore';
 import { useDemoProfile, type DemoProfile } from '../../contexts/demoProfileContext';
 import { db } from '../../config/firebase';
@@ -46,6 +47,13 @@ const obterIniciais = (nome: string) => {
 
 export default function TurmasScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const isTelaPequena = width < 380;
+  const paddingLateral = isTelaPequena ? 16 : 20;
+  const paddingTopo = Platform.OS === 'web' ? 24 : Math.max(insets.top + 12, 24);
+  const paddingBaseModal = Platform.OS === 'web' ? 24 : Math.max(insets.bottom + 14, 24);
+
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isAdmin = perfil === 'admin';
   const isCoord = perfil === 'coordenador';
@@ -299,12 +307,12 @@ export default function TurmasScreen() {
         <TouchableOpacity style={[styles.cardPasta, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]} activeOpacity={0.75} onPress={() => toggleTurma(item.id)}>
           <View style={styles.linhaTituloPasta}>
             <Ionicons name={isExpanded ? 'folder-open' : 'folder'} size={22} color={tema.botaoPrimario} style={{ marginRight: 12 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.tituloPasta, { color: tema.textoPrincipal }]}>{item.nome}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.tituloPasta, { color: tema.textoPrincipal }]} numberOfLines={1}>{item.nome}</Text>
               <Text style={{ color: tema.textoSecundario, fontSize: 11, marginTop: 2 }}>{item.turno || 'Matutino'}</Text>
             </View>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
             <Text style={{ color: tema.textoSecundario, fontSize: 12, marginRight: 10, fontWeight: 'bold' }}>{alunos.length} {alunos.length === 1 ? 'aluno' : 'alunos'}</Text>
             <TouchableOpacity onPress={() => abrirEditarTurma(item)} style={{ padding: 4, marginRight: 6 }} accessibilityLabel="Editar turma">
               <Ionicons name="create-outline" size={18} color={tema.textoSecundario} />
@@ -319,7 +327,7 @@ export default function TurmasScreen() {
             ) : alunos.map(aluno => (
               <View key={aluno.id} style={[styles.cardAlunoClean, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
                 <View style={[styles.iconePessoa, { backgroundColor: tema.botaoPrimario + '20' }]}><Ionicons name="person" size={16} color={tema.botaoPrimario} /></View>
-                <Text style={[styles.nomeAlunoClean, { color: tema.textoPrincipal }]}>{aluno.nome}</Text>
+                <Text style={[styles.nomeAlunoClean, { color: tema.textoPrincipal, flex: 1 }]} numberOfLines={1}>{aluno.nome}</Text>
               </View>
             ))}
           </View>
@@ -336,12 +344,12 @@ export default function TurmasScreen() {
         <TouchableOpacity style={[styles.cardPasta, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]} activeOpacity={0.75} onPress={() => toggleTurma(item.id)}>
           <View style={styles.linhaTituloPasta}>
             <Ionicons name={isExpanded ? 'folder-open' : 'folder'} size={22} color={tema.botaoPrimario} style={{ marginRight: 12 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.tituloPasta, { color: tema.textoPrincipal }]}>{item.nome}</Text>
-              <Text style={{ color: tema.textoSecundario, fontSize: 11, marginTop: 2 }}>{extrairSerie(item.nome)} • {item.turno || 'Matutino'}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.tituloPasta, { color: tema.textoPrincipal }]} numberOfLines={1}>{item.nome}</Text>
+              <Text style={{ color: tema.textoSecundario, fontSize: 11, marginTop: 2 }} numberOfLines={1}>{extrairSerie(item.nome)} • {item.turno || 'Matutino'}</Text>
             </View>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
             <Text style={{ color: tema.textoSecundario, fontSize: 12, marginRight: 8, fontWeight: 'bold' }}>{alunos.length} {alunos.length === 1 ? 'aluno' : 'alunos'}</Text>
             <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={20} color={tema.textoSecundario} />
           </View>
@@ -353,11 +361,11 @@ export default function TurmasScreen() {
             ) : alunos.map(aluno => (
               <View key={aluno.id} style={[styles.cardAlunoClean, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
                 <View style={[styles.iconePessoa, { backgroundColor: tema.botaoPrimario + '20' }]}><Ionicons name="person" size={16} color={tema.botaoPrimario} /></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.nomeAlunoClean, { color: tema.textoPrincipal }]}>{aluno.nome}</Text>
+                <View style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
+                  <Text style={[styles.nomeAlunoClean, { color: tema.textoPrincipal }]} numberOfLines={1}>{aluno.nome}</Text>
                   {!!aluno.matricula && <Text style={{ color: tema.textoSecundario, fontSize: 11 }}>Mat. {aluno.matricula}</Text>}
                 </View>
-                <TouchableOpacity style={[styles.btnTransferir, { borderColor: tema.botaoPrimario, backgroundColor: tema.botaoPrimario + '15' }]} onPress={() => { setAlunoTransferir({ aluno, turmaOrigem: item }); setTurmaDestinoId(''); }}>
+                <TouchableOpacity style={[styles.btnTransferir, { borderColor: tema.botaoPrimario, backgroundColor: tema.botaoPrimario + '15', flexShrink: 0 }]} onPress={() => { setAlunoTransferir({ aluno, turmaOrigem: item }); setTurmaDestinoId(''); }}>
                   <Ionicons name="swap-horizontal" size={14} color={tema.botaoPrimario} />
                   <Text style={{ color: tema.botaoPrimario, fontSize: 11, fontWeight: '700' }}>Transferir</Text>
                 </TouchableOpacity>
@@ -392,7 +400,7 @@ export default function TurmasScreen() {
                   </View>
                 )}
               </View>
-              <View style={[styles.badgeStatus, { backgroundColor: isRealizada ? '#2E7D3220' : '#EF6C0020', borderColor: isRealizada ? '#2E7D32' : '#EF6C00' }]}>
+              <View style={[styles.badgeStatus, { backgroundColor: isRealizada ? '#2E7D3220' : '#EF6C0020', borderColor: isRealizada ? '#2E7D32' : '#EF6C00', flexShrink: 0 }]}>
                 <Text style={[styles.textoBadge, { color: isRealizada ? '#2E7D32' : '#EF6C00' }]}>{isRealizada ? 'REALIZADA' : 'PENDENTE'}</Text>
               </View>
             </View>
@@ -417,7 +425,7 @@ export default function TurmasScreen() {
           <View style={[styles.divisorRodape, { backgroundColor: tema.borda }]} />
           <TouchableOpacity style={[styles.btnRodapePrim, { opacity: isBloqueado ? 0.55 : 1 }]} disabled={isBloqueado} onPress={() => router.push(`/chamada?id=${item.id}`)}>
             <Ionicons name={isRealizada ? 'checkmark-done-outline' : isBloqueado ? 'lock-closed-outline' : 'checkbox-outline'} size={16} color={isRealizada ? '#2E7D32' : isBloqueado ? tema.textoSecundario : tema.botaoPrimario} />
-            <Text style={{ color: isRealizada ? '#2E7D32' : isBloqueado ? tema.textoSecundario : tema.botaoPrimario, fontSize: 12, fontWeight: '700' }}>
+            <Text style={{ color: isRealizada ? '#2E7D32' : isBloqueado ? tema.textoSecundario : tema.botaoPrimario, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>
               {isRealizada ? `Chamada (${horaRealizada})` : isBloqueado ? 'Fora do dia' : 'Fazer Chamada'}
             </Text>
           </TouchableOpacity>
@@ -430,23 +438,41 @@ export default function TurmasScreen() {
   return (
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: tema.fundoBase }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       {/* Cabeçalho, Filtros e Busca */}
-      <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
+      <View style={[styles.header, { backgroundColor: tema.fundoTopo, paddingTop: paddingTopo, paddingHorizontal: paddingLateral }]}>
         <View style={styles.topoLinha}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={styles.topoEsquerda}>
             {isAdmin && (
-              <TouchableOpacity onPress={voltar} accessibilityLabel="Voltar"><Ionicons name="arrow-back" size={24} color={tema.textoLogo} /></TouchableOpacity>
+              <TouchableOpacity onPress={voltar} style={styles.btnVoltar} accessibilityLabel="Voltar">
+                <Ionicons name="arrow-back" size={22} color={tema.textoLogo} />
+              </TouchableOpacity>
             )}
-            <Text style={[styles.tituloHeader, { color: tema.textoLogo }]}>
+            <Text
+              style={[styles.tituloHeader, { color: tema.textoLogo, fontSize: isTelaPequena ? 19 : 22 }]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
               {isAdmin ? 'Turmas Cadastradas' : isCoord ? 'Turmas e Alunos' : 'Grade de Aulas'}
             </Text>
           </View>
           {isAdmin ? (
-            <TouchableOpacity style={[styles.btnAddTopo, { backgroundColor: tema.botaoPrimario }]} onPress={abrirCriarTurma}>
-              <Ionicons name="add" size={18} color={tema.textoBotao} />
-              <Text style={{ color: tema.textoBotao, fontSize: 12, fontWeight: '700' }}>Nova Turma</Text>
+            <TouchableOpacity
+              style={[
+                styles.btnAddTopo,
+                {
+                  backgroundColor: tema.botaoPrimario,
+                  paddingHorizontal: isTelaPequena ? 9 : 12,
+                  paddingVertical: isTelaPequena ? 6 : 7,
+                },
+              ]}
+              onPress={abrirCriarTurma}
+            >
+              <Ionicons name="add" size={isTelaPequena ? 16 : 18} color={tema.textoBotao} />
+              <Text style={{ color: tema.textoBotao, fontSize: isTelaPequena ? 11 : 12, fontWeight: '700' }} numberOfLines={1}>
+                Nova Turma
+              </Text>
             </TouchableOpacity>
           ) : (
-            <Text style={{ color: tema.textoLogo, opacity: 0.75, fontSize: 12 }}>{NOMES_PERFIS[perfil]}</Text>
+            <Text style={{ color: tema.textoLogo, opacity: 0.75, fontSize: 12, flexShrink: 0 }}>{NOMES_PERFIS[perfil]}</Text>
           )}
         </View>
         <Text style={[styles.subtituloData, { color: tema.textoLogo }]}>{dataHeader}</Text>
@@ -490,7 +516,7 @@ export default function TurmasScreen() {
         </View>
         {isCoord && temFiltroAtivoCoord && (
           <View style={styles.barraFiltroAtivo}>
-            <Text style={{ color: tema.textoLogo, fontSize: 12, opacity: 0.9 }}>
+            <Text style={{ color: tema.textoLogo, fontSize: 12, opacity: 0.9, flex: 1, marginRight: 8 }} numberOfLines={1}>
               Filtro: <Text style={{ fontWeight: 'bold' }}>{salaSelecionadaObj ? salaSelecionadaObj.nome : serieFiltroCoord} • {turnoFiltro}</Text>
             </Text>
             <TouchableOpacity onPress={limparFiltrosCoord}><Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: 'bold' }}>Limpar</Text></TouchableOpacity>
@@ -509,51 +535,51 @@ export default function TurmasScreen() {
           data={turmasFiltradas}
           keyExtractor={item => item.id}
           renderItem={isAdmin ? renderPastaAdmin : isCoord ? renderPastaCoord : renderTurmaDocente}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingHorizontal: paddingLateral }]}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosTurmas()} tintColor={tema.botaoPrimario} />}
           ListHeaderComponent={
             isAdmin ? (
-              <View style={styles.resumoRow}>
+              <View style={[styles.resumoRow, { gap: isTelaPequena ? 8 : 10 }]}>
                 {[
                   { icone: 'layers-outline' as const, valor: turmasFiltradas.length, label: 'Turmas Cadastradas', pill: 'Total', cor: tema.botaoPrimario },
                   { icone: 'folder-outline' as const, valor: totalTurmasComAlunos, label: 'Turmas com Alunos', pill: 'Ativas', cor: tema.botaoPrimario },
                   { icone: 'school-outline' as const, valor: totalAlunosVinculados, label: 'Alunos Vinculados', pill: 'Ativos', cor: '#2E7D32' },
                 ].map(card => (
-                  <View key={card.label} style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-                    <Ionicons name={card.icone} size={20} color={tema.botaoPrimario} />
-                    <Text style={[styles.valorResumo, { color: tema.textoPrincipal }]}>{card.valor}</Text>
-                    <Text style={[styles.labelResumo, { color: tema.textoSecundario }]}>{card.label}</Text>
+                  <View key={card.label} style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda, padding: isTelaPequena ? 10 : 14 }]}>
+                    <Ionicons name={card.icone} size={isTelaPequena ? 18 : 20} color={tema.botaoPrimario} />
+                    <Text style={[styles.valorResumo, { color: tema.textoPrincipal, fontSize: isTelaPequena ? 19 : 22 }]}>{card.valor}</Text>
+                    <Text style={[styles.labelResumo, { color: tema.textoSecundario }]} numberOfLines={2}>{card.label}</Text>
                     <View style={[styles.pillResumo, { backgroundColor: card.cor + '20' }]}><Text style={{ color: card.cor, fontSize: 10, fontWeight: 'bold' }}>{card.pill}</Text></View>
                   </View>
                 ))}
               </View>
             ) : isCoord ? (
-              <View style={styles.resumoRow}>
+              <View style={[styles.resumoRow, { gap: isTelaPequena ? 8 : 10 }]}>
                 {[
                   { icone: 'school-outline' as const, valor: totalAlunosVinculados, label: salaSelecionadaObj ? `Alunos (${salaSelecionadaObj.nome})` : serieFiltroCoord === 'Todas' ? 'Alunos em Geral' : `Alunos (${serieFiltroCoord})`, pill: 'Matriculados', cor: '#2E7D32' },
                   { icone: 'people-outline' as const, valor: totalProfessoresCoord, label: 'Professores', pill: 'Ativos', cor: '#6366F1' },
                   { icone: 'layers-outline' as const, valor: turmasFiltradas.length, label: 'Turmas', pill: turnoFiltro === 'Todos' ? 'Geral' : turnoFiltro, cor: tema.botaoPrimario },
                 ].map(card => (
-                  <View key={card.label} style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-                    <Ionicons name={card.icone} size={20} color={tema.botaoPrimario} />
-                    <Text style={[styles.valorResumo, { color: tema.textoPrincipal }]}>{card.valor}</Text>
-                    <Text style={[styles.labelResumo, { color: tema.textoSecundario }]}>{card.label}</Text>
+                  <View key={card.label} style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda, padding: isTelaPequena ? 10 : 14 }]}>
+                    <Ionicons name={card.icone} size={isTelaPequena ? 18 : 20} color={tema.botaoPrimario} />
+                    <Text style={[styles.valorResumo, { color: tema.textoPrincipal, fontSize: isTelaPequena ? 19 : 22 }]}>{card.valor}</Text>
+                    <Text style={[styles.labelResumo, { color: tema.textoSecundario }]} numberOfLines={2}>{card.label}</Text>
                     <View style={[styles.pillResumo, { backgroundColor: card.cor + '20' }]}><Text style={{ color: card.cor, fontSize: 10, fontWeight: 'bold' }}>{card.pill}</Text></View>
                   </View>
                 ))}
               </View>
             ) : (
-              <View style={styles.resumoRow}>
+              <View style={[styles.resumoRow, { gap: isTelaPequena ? 8 : 10 }]}>
                 {[
                   { icone: 'today-outline' as const, valor: kpisProf.aulasHoje, label: 'Aulas Hoje', pill: 'Dia', cor: tema.botaoPrimario },
                   { icone: 'time-outline' as const, valor: kpisProf.pendentesHoje, label: 'Chamadas', pill: kpisProf.pendentesHoje > 0 ? 'Pendentes' : 'Em dia', cor: kpisProf.pendentesHoje > 0 ? '#EF6C00' : '#2E7D32' },
                   { icone: 'calendar-outline' as const, valor: kpisProf.totalSemana, label: 'Na Semana', pill: 'Grade', cor: '#6366F1' },
                 ].map(card => (
-                  <View key={card.label} style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-                    <Ionicons name={card.icone} size={20} color={card.cor} />
-                    <Text style={[styles.valorResumo, { color: tema.textoPrincipal }]}>{card.valor}</Text>
-                    <Text style={[styles.labelResumo, { color: tema.textoSecundario }]}>{card.label}</Text>
+                  <View key={card.label} style={[styles.cardResumo, { backgroundColor: tema.inputBackground, borderColor: tema.borda, padding: isTelaPequena ? 10 : 14 }]}>
+                    <Ionicons name={card.icone} size={isTelaPequena ? 18 : 20} color={card.cor} />
+                    <Text style={[styles.valorResumo, { color: tema.textoPrincipal, fontSize: isTelaPequena ? 19 : 22 }]}>{card.valor}</Text>
+                    <Text style={[styles.labelResumo, { color: tema.textoSecundario }]} numberOfLines={2}>{card.label}</Text>
                     <View style={[styles.pillResumo, { backgroundColor: card.cor + '20' }]}><Text style={{ color: card.cor, fontSize: 10, fontWeight: 'bold' }}>{card.pill}</Text></View>
                   </View>
                 ))}
@@ -575,9 +601,9 @@ export default function TurmasScreen() {
       {/* Modal: Lista de Alunos da Turma (Professor) */}
       <Modal visible={turmaAlunosModal !== null} transparent animationType="slide" onRequestClose={() => setTurmaAlunosModal(null)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
+          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda, paddingBottom: paddingBaseModal }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
-              <View style={{ flex: 1 }}>
+              <View style={{ flex: 1, marginRight: 10 }}>
                 <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>{turmaAlunosModal?.nome || 'Turma'}</Text>
                 <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 2 }}>
                   {turmaAlunosModal?.disciplina || turmaAlunosModal?.materia} • {turmaAlunosModal?.diaSemana} ({turmaAlunosModal?.horario})
@@ -613,7 +639,7 @@ export default function TurmasScreen() {
       {/* Modal: Filtros de Série e Turno (Coordenador) */}
       <Modal visible={modalFiltroCoord} transparent animationType="slide" onRequestClose={() => setModalFiltroCoord(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
+          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda, paddingBottom: paddingBaseModal }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Filtrar Turmas</Text>
               <TouchableOpacity onPress={() => setModalFiltroCoord(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
@@ -696,7 +722,7 @@ export default function TurmasScreen() {
       {/* Modal: Criar / Editar Turma (Admin) */}
       <Modal visible={modalFormTurma} transparent animationType="slide" onRequestClose={() => setModalFormTurma(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
+          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda, paddingBottom: paddingBaseModal }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>{turmaEditandoId ? 'Editar Turma' : 'Nova Turma'}</Text>
               <TouchableOpacity onPress={() => setModalFormTurma(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
@@ -733,7 +759,7 @@ export default function TurmasScreen() {
       {/* Modal: Transferir Aluno (Coordenador) */}
       <Modal visible={alunoTransferir !== null} transparent animationType="slide" onRequestClose={() => setAlunoTransferir(null)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
+          <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda, paddingBottom: paddingBaseModal }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Transferir Aluno</Text>
               <TouchableOpacity onPress={() => setAlunoTransferir(null)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
@@ -775,11 +801,13 @@ export default function TurmasScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centro: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 20, elevation: 5, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
-  topoLinha: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  btnAddTopo: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, gap: 4 },
-  tituloHeader: { fontSize: 24, fontWeight: 'bold' },
-  subtituloData: { fontSize: 13, opacity: 0.8, marginBottom: 2, marginTop: 2 },
+  header: { paddingBottom: 18, elevation: 5, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
+  topoLinha: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
+  topoEsquerda: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },
+  btnVoltar: { padding: 2, flexShrink: 0 },
+  btnAddTopo: { flexDirection: 'row', alignItems: 'center', borderRadius: 10, gap: 4, flexShrink: 0 },
+  tituloHeader: { fontWeight: 'bold', flex: 1 },
+  subtituloData: { fontSize: 13, opacity: 0.8, marginBottom: 2, marginTop: 4 },
   subtituloPerfil: { fontSize: 11, opacity: 0.75, marginBottom: 14 },
   filtrosTurno: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   chipTurno: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
@@ -789,14 +817,14 @@ const styles = StyleSheet.create({
   barraFiltroAtivo: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingHorizontal: 4 },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, height: '100%', fontSize: 14 },
-  listContent: { padding: 20, paddingBottom: 40 },
-  resumoRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
-  cardResumo: { flex: 1, borderWidth: 1, borderRadius: 12, padding: 14, alignItems: 'center' },
-  valorResumo: { fontSize: 22, fontWeight: 'bold', marginTop: 6 },
+  listContent: { paddingVertical: 20, paddingBottom: 40 },
+  resumoRow: { flexDirection: 'row', marginBottom: 18 },
+  cardResumo: { flex: 1, borderWidth: 1, borderRadius: 12, alignItems: 'center' },
+  valorResumo: { fontWeight: 'bold', marginTop: 6 },
   labelResumo: { fontSize: 11, marginTop: 2, textAlign: 'center' },
   pillResumo: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 8 },
   cardPasta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderRadius: 12, padding: 15 },
-  linhaTituloPasta: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 10 },
+  linhaTituloPasta: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0, marginRight: 10 },
   tituloPasta: { fontSize: 16, fontWeight: 'bold' },
   conteudoPasta: { paddingLeft: 15, paddingTop: 10, borderLeftWidth: 2, marginLeft: 15, marginTop: 5 },
   cardAlunoClean: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 8 },
@@ -822,7 +850,7 @@ const styles = StyleSheet.create({
   btnRodapePrim: { flex: 1.2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: '100%' },
   divisorRodape: { width: 1, height: '55%' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  modalConteudo: { maxHeight: '85%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, paddingBottom: 24 },
+  modalConteudo: { maxHeight: '85%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1 },
   modalTitulo: { fontSize: 18, fontWeight: 'bold' },
   labelCampo: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
