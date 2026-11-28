@@ -7,6 +7,7 @@ import { useDemoProfile } from '../contexts/demoProfileContext';
 import { db } from '../config/firebase';
 import { FeedbackToast, type EstadoFeedback, type TipoFeedback } from '../components/FeedbackToast';
 
+// === TIPOS E HELPERS ===
 type StatusPresenca = 'presente' | 'falta' | 'justificada';
 
 interface AlunoChamada {
@@ -34,13 +35,13 @@ export default function ChamadaScreen() {
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isAdmin = perfil === 'admin';
 
+  // === ESTADOS ===
   const [aulaInfo, setAulaInfo] = useState<any>(null);
   const [alunos, setAlunos] = useState<AlunoChamada[]>([]);
   const [conteudoMinistrado, setConteudoMinistrado] = useState('');
   const [busca, setBusca] = useState('');
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
-
   const [chamadaConcluida, setChamadaConcluida] = useState(false);
   const [horaAssinatura, setHoraAssinatura] = useState('');
   const [modalAssinatura, setModalAssinatura] = useState(false);
@@ -52,11 +53,9 @@ export default function ChamadaScreen() {
   }, []);
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
 
+  // === CARREGAMENTO DO DIÁRIO (FIRESTORE) ===
   const buscarDadosChamada = useCallback(async () => {
-    if (!aulaId) {
-      setCarregando(false);
-      return;
-    }
+    if (!aulaId) return setCarregando(false);
     setCarregando(true);
     try {
       let dadosAula: any = null;
@@ -69,9 +68,8 @@ export default function ChamadaScreen() {
       }
       setAulaInfo(dadosAula);
 
-      const dataHoje = getDataDeHoje();
       const chamadasSnap = await getDocs(
-        query(collection(db, 'chamadas'), where('turmaId', '==', aulaId), where('dataChamadaFormatada', '==', dataHoje))
+        query(collection(db, 'chamadas'), where('turmaId', '==', aulaId), where('dataChamadaFormatada', '==', getDataDeHoje()))
       );
 
       if (!chamadasSnap.empty) {
@@ -85,19 +83,9 @@ export default function ChamadaScreen() {
           setAlunos(
             chamadaSalva.alunos.map((a: any) => {
               let st: StatusPresenca = 'presente';
-              if (a.status === 'falta' || a.status === 'justificada' || a.status === 'presente') {
-                st = a.status;
-              } else if (Array.isArray(a.presencas) && a.presencas.some((p: boolean) => !p)) {
-                st = 'falta';
-              }
-              return {
-                id: String(a.id),
-                nome: String(a.nome || 'Aluno'),
-                matricula: a.matricula || '',
-                status: st,
-                obs: String(a.obs || ''),
-                mostrarObs: false,
-              };
+              if (a.status === 'falta' || a.status === 'justificada' || a.status === 'presente') st = a.status;
+              else if (Array.isArray(a.presencas) && a.presencas.some((p: boolean) => !p)) st = 'falta';
+              return { id: String(a.id), nome: String(a.nome || 'Aluno'), matricula: a.matricula || '', status: st, obs: String(a.obs || ''), mostrarObs: false };
             })
           );
         }
@@ -110,37 +98,25 @@ export default function ChamadaScreen() {
         const listaAlunos: AlunoChamada[] = alunosSnap.docs
           .map(d => ({ id: d.id, ...(d.data() as any) }))
           .filter(a => a.turmaId === turmaRealId || (nomeTurma && (a.turmaNome === nomeTurma || a.turma === nomeTurma)))
-          .map(a => ({
-            id: a.id,
-            nome: String(a.nome || 'Aluno sem nome'),
-            matricula: typeof a.matricula === 'string' ? a.matricula : '',
-            status: 'presente' as StatusPresenca,
-            obs: '',
-            mostrarObs: false,
-          }))
+          .map(a => ({ id: a.id, nome: String(a.nome || 'Aluno sem nome'), matricula: typeof a.matricula === 'string' ? a.matricula : '', status: 'presente' as StatusPresenca, obs: '', mostrarObs: false }))
           .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
         setAlunos(listaAlunos);
       }
     } catch (error: any) {
       notificar('erro', 'Erro ao carregar diário', error?.message || 'Falha ao consultar o Firestore.');
-    } finally { setCarregando(false); }
+    } finally {
+      setCarregando(false);
+    }
   }, [aulaId, notificar]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void buscarDadosChamada();
-    }, [buscarDadosChamada])
-  );
+  useFocusEffect(useCallback(() => { void buscarDadosChamada(); }, [buscarDadosChamada]));
 
+  // === AÇÕES DE FREQUÊNCIA E ASSINATURA ===
   const alterarStatus = (alunoId: string, novoStatus: StatusPresenca) => {
     if (chamadaConcluida && !isAdmin) return;
     setAlunos(prev => prev.map(a => (a.id === alunoId ? { ...a, status: novoStatus } : a)));
   };
-
-  const toggleMostrarObs = (alunoId: string) => {
-    setAlunos(prev => prev.map(a => (a.id === alunoId ? { ...a, mostrarObs: !a.mostrarObs } : a)));
-  };
-
+  const toggleMostrarObs = (alunoId: string) => setAlunos(prev => prev.map(a => (a.id === alunoId ? { ...a, mostrarObs: !a.mostrarObs } : a)));
   const setObservacao = (alunoId: string, texto: string) => {
     if (chamadaConcluida && !isAdmin) return;
     setAlunos(prev => prev.map(a => (a.id === alunoId ? { ...a, obs: texto } : a)));
@@ -154,8 +130,7 @@ export default function ChamadaScreen() {
 
   const alunosFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
-    if (!termo) return alunos;
-    return alunos.filter(a => a.nome.toLowerCase().includes(termo));
+    return termo ? alunos.filter(a => a.nome.toLowerCase().includes(termo)) : alunos;
   }, [alunos, busca]);
 
   const confirmarAssinatura = async () => {
@@ -196,21 +171,17 @@ export default function ChamadaScreen() {
       notificar('sucesso', 'Diário Assinado!', 'Frequência registrada e bloqueada com sucesso.');
     } catch (error: any) {
       notificar('erro', 'Erro ao salvar chamada', error?.message || 'Falha ao gravar no Firestore.');
-    } finally { setSalvando(false); }
+    } finally {
+      setSalvando(false);
+    }
   };
 
-  const toastProps = {
-    feedback,
-    onFechar: fecharFeedback,
-    fundoCard: tema.fundoTopo,
-    textoPrincipal: tema.textoPrincipal,
-    textoSecundario: tema.textoSecundario,
-  };
+  const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
 
+  // === RENDERIZADOR DE ALUNO ===
   const renderAluno = ({ item }: { item: AlunoChamada }) => {
     const corBorda = item.status === 'falta' ? '#C62828' : item.status === 'justificada' ? '#EF6C00' : tema.borda;
     const bloqueado = chamadaConcluida && !isAdmin;
-
     return (
       <View style={[styles.cardAluno, { backgroundColor: tema.inputBackground, borderColor: corBorda }]}>
         <View style={styles.linhaPrincipal}>
@@ -221,7 +192,6 @@ export default function ChamadaScreen() {
             <Text style={[styles.nomeAluno, { color: tema.textoPrincipal }]} numberOfLines={1}>{item.nome}</Text>
             {!!item.matricula && <Text style={{ color: tema.textoSecundario, fontSize: 11 }}>Mat. {item.matricula}</Text>}
           </View>
-
           <View style={styles.areaBotoes}>
             {([
               { key: 'presente', label: 'P', cor: '#2E7D32' },
@@ -234,29 +204,17 @@ export default function ChamadaScreen() {
                   key={op.key}
                   disabled={bloqueado}
                   onPress={() => alterarStatus(item.id, op.key)}
-                  style={[
-                    styles.btnStatusPill,
-                    {
-                      backgroundColor: ativo ? op.cor : tema.fundoBase,
-                      borderColor: ativo ? op.cor : tema.borda,
-                      opacity: bloqueado && !ativo ? 0.35 : 1,
-                    },
-                  ]}
+                  style={[styles.btnStatusPill, { backgroundColor: ativo ? op.cor : tema.fundoBase, borderColor: ativo ? op.cor : tema.borda, opacity: bloqueado && !ativo ? 0.35 : 1 }]}
                 >
                   <Text style={{ color: ativo ? '#FFF' : tema.textoSecundario, fontSize: 12, fontWeight: '800' }}>{op.label}</Text>
                 </TouchableOpacity>
               );
             })}
             <TouchableOpacity style={styles.btnObsIcon} onPress={() => toggleMostrarObs(item.id)}>
-              <Ionicons
-                name={item.obs ? 'chatbox-ellipses' : 'chatbox-ellipses-outline'}
-                size={20}
-                color={item.obs ? tema.botaoPrimario : tema.textoSecundario}
-              />
+              <Ionicons name={item.obs ? 'chatbox-ellipses' : 'chatbox-ellipses-outline'} size={20} color={item.obs ? tema.botaoPrimario : tema.textoSecundario} />
             </TouchableOpacity>
           </View>
         </View>
-
         {item.mostrarObs && (
           <View style={[styles.areaObs, { borderTopColor: tema.borda }]}>
             <TextInput
@@ -274,8 +232,10 @@ export default function ChamadaScreen() {
     );
   };
 
+  // === INTERFACE ===
   return (
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: tema.fundoBase }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {/* Cabeçalho e Busca */}
       <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.btnVoltar} accessibilityLabel="Voltar">
@@ -290,28 +250,21 @@ export default function ChamadaScreen() {
             </Text>
           </View>
         </View>
-
-        <View style={[styles.statusContainer, { backgroundColor: chamadaConcluida ? 'rgba(255,255,255,0.16)' : '#2E7D32' }]}>
+        <View style={[styles.statusContainer, { backgroundColor: chamadaConcluida ? 'rgba(124, 124, 255, 0.22)' : '#2E7D32' }]}>
           <Ionicons name={chamadaConcluida ? 'lock-closed' : 'document-text-outline'} size={15} color="#FFF" />
           <Text style={styles.textoStatus}>
             {chamadaConcluida ? `Diário Assinado e Fechado${horaAssinatura ? ` (${horaAssinatura})` : ''}` : 'Diário Aberto • Marque P (Presente), F (Falta) ou J (Justificada)'}
           </Text>
         </View>
-
         <View style={[styles.searchContainer, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
           <Ionicons name="search" size={18} color={tema.textoSecundario} style={{ marginRight: 8 }} />
-          <TextInput
-            style={[styles.searchInput, { color: tema.textoPrincipal }]}
-            placeholder="Buscar aluno..."
-            placeholderTextColor={tema.textoSecundario}
-            value={busca}
-            onChangeText={setBusca}
-          />
+          <TextInput style={[styles.searchInput, { color: tema.textoPrincipal }]} placeholder="Buscar aluno..." placeholderTextColor={tema.textoSecundario} value={busca} onChangeText={setBusca} />
         </View>
       </View>
 
+      {/* Lista de Alunos */}
       {carregando ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={styles.centro}>
           <ActivityIndicator size="large" color={tema.botaoPrimario} />
           <Text style={{ marginTop: 10, color: tema.textoSecundario }}>Sincronizando diário...</Text>
         </View>
@@ -338,7 +291,6 @@ export default function ChamadaScreen() {
                   </View>
                 ))}
               </View>
-
               <View style={[styles.cardConteudo, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
                 <Text style={[styles.labelConteudo, { color: tema.textoSecundario }]}>Conteúdo Ministrado (Diário de Classe)</Text>
                 <TextInput
@@ -357,23 +309,18 @@ export default function ChamadaScreen() {
             <View style={{ alignItems: 'center', marginTop: 30 }}>
               <Ionicons name="people-outline" size={38} color={tema.textoSecundario} />
               <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 15, marginTop: 10 }}>Nenhum aluno encontrado</Text>
-              <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 4, textAlign: 'center' }}>
-                Não há alunos matriculados nesta turma ainda.
-              </Text>
+              <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 4, textAlign: 'center' }}>Não há alunos matriculados nesta turma ainda.</Text>
             </View>
           }
         />
       )}
 
+      {/* Rodapé Fixo de Assinatura */}
       {!chamadaConcluida && !carregando && alunos.length > 0 && (
         <View style={[styles.rodapeFixo, { backgroundColor: tema.fundoTopo, borderTopColor: tema.borda }]}>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: tema.textoLogo, fontSize: 13, fontWeight: '700' }}>
-              {resumo.presentes} presente(s) • {resumo.faltas} falta(s)
-            </Text>
-            <Text style={{ color: tema.textoLogo, fontSize: 11, opacity: 0.75 }}>
-              Pronto para assinatura digital
-            </Text>
+            <Text style={{ color: tema.textoLogo, fontSize: 13, fontWeight: '700' }}>{resumo.presentes} presente(s) • {resumo.faltas} falta(s)</Text>
+            <Text style={{ color: tema.textoLogo, fontSize: 11, opacity: 0.75 }}>Pronto para assinatura digital</Text>
           </View>
           <TouchableOpacity style={[styles.btnConcluir, { backgroundColor: tema.botaoPrimario }]} onPress={() => setModalAssinatura(true)} activeOpacity={0.8}>
             <Ionicons name="shield-checkmark-outline" size={18} color={tema.textoBotao} />
@@ -382,6 +329,7 @@ export default function ChamadaScreen() {
         </View>
       )}
 
+      {/* Modal: Assinatura Eletrônica */}
       <Modal visible={modalAssinatura} transparent animationType="fade" onRequestClose={() => setModalAssinatura(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCardCentro, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -390,20 +338,13 @@ export default function ChamadaScreen() {
                 <Ionicons name="shield-checkmark" size={20} color={tema.botaoPrimario} />
                 <Text style={[styles.tituloModal, { color: tema.textoPrincipal }]}>Assinatura Eletrônica</Text>
               </View>
-              <TouchableOpacity onPress={() => setModalAssinatura(false)}>
-                <Ionicons name="close" size={22} color={tema.textoSecundario} />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setModalAssinatura(false)}><Ionicons name="close" size={22} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
             <View style={{ padding: 20 }}>
               <View style={[styles.boxResumoModal, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-                <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 14 }}>
-                  {aulaInfo?.nome || 'Turma'} • {aulaInfo?.disciplina || aulaInfo?.materia || ''}
-                </Text>
-                <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 4 }}>
-                  Presentes: {resumo.presentes} • Faltas: {resumo.faltas} • Justificadas: {resumo.justificadas}
-                </Text>
+                <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 14 }}>{aulaInfo?.nome || 'Turma'} • {aulaInfo?.disciplina || aulaInfo?.materia || ''}</Text>
+                <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 4 }}>Presentes: {resumo.presentes} • Faltas: {resumo.faltas} • Justificadas: {resumo.justificadas}</Text>
               </View>
-
               <Text style={[styles.labelConteudo, { color: tema.textoPrincipal, marginTop: 14 }]}>Confirme sua senha docente *</Text>
               <TextInput
                 style={[styles.inputSenhaModal, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]}
@@ -413,7 +354,6 @@ export default function ChamadaScreen() {
                 value={senhaConfirmacao}
                 onChangeText={setSenhaConfirmacao}
               />
-
               <View style={styles.modalBotoes}>
                 <TouchableOpacity style={[styles.btnCancelar, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]} onPress={() => setModalAssinatura(false)} disabled={salvando}>
                   <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 13 }}>Revisar</Text>
@@ -434,8 +374,10 @@ export default function ChamadaScreen() {
   );
 }
 
+// === ESTILOS ===
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  centro: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: { paddingTop: 50, paddingBottom: 18, paddingHorizontal: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, elevation: 5 },
   headerRow: { flexDirection: 'row', alignItems: 'center' },
   btnVoltar: { marginRight: 12, padding: 4 },

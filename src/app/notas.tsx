@@ -7,6 +7,7 @@ import { useDemoProfile } from '../contexts/demoProfileContext';
 import { db } from '../config/firebase';
 import { FeedbackToast, type EstadoFeedback, type TipoFeedback } from '../components/FeedbackToast';
 
+// === TIPOS E HELPERS ===
 type StatusNota = 'lancada' | 'aguardando' | 'recusado';
 type FiltroNotasCoord = 'todos' | 'abaixo' | 'solicitacoes';
 
@@ -44,6 +45,7 @@ export default function NotasScreen() {
   const nomeMateria = String(params.materia || '');
   const valorInicialParam = Number(params.valorMaximo) > 0 ? Number(params.valorMaximo) : 10;
 
+  // === ESTADOS ===
   const [valorMaximoProva, setValorMaximoProva] = useState<number>(valorInicialParam);
   const [periodoAberto, setPeriodoAberto] = useState(params.status === 'aberto');
   const [alunos, setAlunos] = useState<AlunoNotaItem[]>([]);
@@ -57,7 +59,6 @@ export default function NotasScreen() {
   const [textoJustificativa, setTextoJustificativa] = useState('');
   const [textoRecusa, setTextoRecusa] = useState('');
   const [mostraInputRecusa, setMostraInputRecusa] = useState(false);
-
   const [modalConfirmarNotas, setModalConfirmarNotas] = useState(false);
   const [senhaAssinatura, setSenhaAssinatura] = useState('');
   const [feedback, setFeedback] = useState<EstadoFeedback>({ visivel: false, tipo: 'sucesso', titulo: '', mensagem: '' });
@@ -67,14 +68,13 @@ export default function NotasScreen() {
   }, []);
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
 
+  // === CARREGAMENTO DE DADOS (FIRESTORE) ===
   const buscarNotasDoBanco = useCallback(async () => {
     setCarregando(true);
     try {
       const [alunosSnap, notasSnap] = await Promise.all([
         getDocs(collection(db, 'alunos')),
-        nomeTurma
-          ? getDocs(query(collection(db, 'notas'), where('turma', '==', nomeTurma)))
-          : getDocs(collection(db, 'notas')),
+        nomeTurma ? getDocs(query(collection(db, 'notas'), where('turma', '==', nomeTurma))) : getDocs(collection(db, 'notas')),
       ]);
 
       if (avaliacaoId) {
@@ -82,18 +82,14 @@ export default function NotasScreen() {
         if (avSnap.exists()) {
           const dadosAv = avSnap.data();
           setPeriodoAberto(dadosAv.statusPrazo !== 'fechado' && dadosAv.status !== 'concluido');
-          if (Number(dadosAv.valorMaximo) > 0) {
-            setValorMaximoProva(Number(dadosAv.valorMaximo));
-          }
+          if (Number(dadosAv.valorMaximo) > 0) setValorMaximoProva(Number(dadosAv.valorMaximo));
         }
       }
 
       const mapaNotas: Record<string, any> = {};
       notasSnap.forEach(d => {
         const data = d.data();
-        if (String(data.avaliacao || '') === tituloAvaliacao) {
-          mapaNotas[String(data.alunoId || '')] = data;
-        }
+        if (String(data.avaliacao || '') === tituloAvaliacao) mapaNotas[String(data.alunoId || '')] = data;
       });
 
       const listaAlunos: AlunoNotaItem[] = alunosSnap.docs
@@ -120,15 +116,14 @@ export default function NotasScreen() {
       setStatusRascunhoTexto(temRascunho ? 'Rascunho salvo (aguardando validação)' : 'Sincronizado com o banco');
     } catch (error: any) {
       notificar('erro', 'Erro ao carregar notas', error?.message || 'Não foi possível consultar o Firestore.');
-    } finally { setCarregando(false); }
+    } finally {
+      setCarregando(false);
+    }
   }, [avaliacaoId, nomeTurma, tituloAvaliacao, notificar]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void buscarNotasDoBanco();
-    }, [buscarNotasDoBanco])
-  );
+  useFocusEffect(useCallback(() => { void buscarNotasDoBanco(); }, [buscarNotasDoBanco]));
 
+  // === AÇÕES FIRESTORE (PRAZO, RASCUNHO, LANÇAMENTO E RETIFICAÇÃO) ===
   const alternarPrazoFirestore = async () => {
     const proximoAberto = !periodoAberto;
     setPeriodoAberto(proximoAberto);
@@ -143,7 +138,9 @@ export default function NotasScreen() {
     } catch (error: any) {
       setPeriodoAberto(!proximoAberto);
       notificar('erro', 'Erro ao atualizar prazo', error?.message || 'Falha ao gravar no Firestore.');
-    } finally { setSalvando(false); }
+    } finally {
+      setSalvando(false);
+    }
   };
 
   const persistirNotaFirestore = async (aluno: AlunoNotaItem, comoRascunho = false) => {
@@ -181,9 +178,7 @@ export default function NotasScreen() {
     setStatusRascunhoTexto('Salvando rascunho...');
     try {
       await persistirNotaFirestore(aluno, true);
-      if (avaliacaoId && aluno.nota !== '') {
-        await updateDoc(doc(db, 'avaliacoes', avaliacaoId), { status: 'andamento' });
-      }
+      if (avaliacaoId && aluno.nota !== '') await updateDoc(doc(db, 'avaliacoes', avaliacaoId), { status: 'andamento' });
       setStatusRascunhoTexto('Rascunho salvo automaticamente');
     } catch {
       setStatusRascunhoTexto('Erro ao salvar rascunho');
@@ -199,9 +194,7 @@ export default function NotasScreen() {
       await Promise.all(alunos.map(aluno => persistirNotaFirestore(aluno, true)));
       if (avaliacaoId) {
         const preenchidas = alunos.filter(a => a.nota !== '' && !Number.isNaN(Number(a.nota))).length;
-        if (preenchidas > 0) {
-          await updateDoc(doc(db, 'avaliacoes', avaliacaoId), { status: 'andamento' });
-        }
+        if (preenchidas > 0) await updateDoc(doc(db, 'avaliacoes', avaliacaoId), { status: 'andamento' });
       }
       setStatusRascunhoTexto('Rascunho salvo no banco');
       notificar('sucesso', 'Rascunho salvo!', 'Você pode sair e continuar preenchendo depois.');
@@ -215,9 +208,7 @@ export default function NotasScreen() {
 
   const abrirModalAssinaturaNotas = () => {
     const preenchidas = alunos.filter(a => a.nota !== '' && !Number.isNaN(Number(a.nota))).length;
-    if (preenchidas === 0) {
-      return notificar('aviso', 'Nenhuma nota preenchida', 'Digite pelo menos uma nota antes de validar o lançamento.');
-    }
+    if (preenchidas === 0) return notificar('aviso', 'Nenhuma nota preenchida', 'Digite pelo menos uma nota antes de validar o lançamento.');
     setSenhaAssinatura('');
     setModalConfirmarNotas(true);
   };
@@ -229,7 +220,6 @@ export default function NotasScreen() {
     setSalvando(true);
     try {
       await Promise.all(alunos.map(aluno => persistirNotaFirestore({ ...aluno, rascunho: false }, false)));
-
       if (avaliacaoId) {
         const preenchidas = alunos.filter(a => a.nota !== '' && !Number.isNaN(Number(a.nota))).length;
         const todasPreenchidas = alunos.length > 0 && preenchidas === alunos.length;
@@ -238,7 +228,6 @@ export default function NotasScreen() {
           ultimaAtualizacaoNotas: serverTimestamp(),
         });
       }
-
       setAlunos(prev => prev.map(a => ({ ...a, rascunho: false })));
       setModalConfirmarNotas(false);
       setSenhaAssinatura('');
@@ -246,7 +235,9 @@ export default function NotasScreen() {
       notificar('sucesso', 'Notas lançadas com sucesso!', 'Planilha validada, assinada e sincronizada no banco de dados.');
     } catch (error: any) {
       notificar('erro', 'Erro ao lançar notas', error?.message || 'Não foi possível salvar no Firestore.');
-    } finally { setSalvando(false); }
+    } finally {
+      setSalvando(false);
+    }
   };
 
   const enviarSolicitacaoProfessor = async (aluno: AlunoNotaItem) => {
@@ -261,7 +252,9 @@ export default function NotasScreen() {
       notificar('sucesso', 'Solicitação enviada', `Pedido de retificação de ${aluno.nome} enviado à coordenação.`);
     } catch (error: any) {
       notificar('erro', 'Erro ao enviar', error?.message || 'Não foi possível registrar a solicitação.');
-    } finally { setSalvando(false); }
+    } finally {
+      setSalvando(false);
+    }
   };
 
   const responderSolicitacaoCoord = async (aluno: AlunoNotaItem, aprovar: boolean) => {
@@ -281,17 +274,22 @@ export default function NotasScreen() {
       notificar('sucesso', aprovar ? 'Alteração autorizada' : 'Solicitação recusada', `Status de ${aluno.nome} atualizado no banco.`);
     } catch (error: any) {
       notificar('erro', 'Erro ao atualizar', error?.message || 'Falha ao salvar decisão.');
-    } finally { setSalvando(false); }
+    } finally {
+      setSalvando(false);
+    }
   };
 
+  // === KPIS E FILTROS ===
   const kpis = useMemo(() => {
     const comNota = alunos.filter(a => a.nota !== '' && !Number.isNaN(Number(a.nota)));
     const soma = comNota.reduce((acc, a) => acc + Number(a.nota), 0);
-    const media = comNota.length > 0 ? (soma / comNota.length).toFixed(1) : '—';
     const mediaCorte = valorMaximoProva * 0.6;
-    const acimaMedia = comNota.filter(a => Number(a.nota) >= mediaCorte).length;
-    const solicitacoes = alunos.filter(a => a.status === 'aguardando').length;
-    return { media, acimaMedia, solicitacoes, totalLancadas: comNota.length };
+    return {
+      media: comNota.length > 0 ? (soma / comNota.length).toFixed(1) : '—',
+      acimaMedia: comNota.filter(a => Number(a.nota) >= mediaCorte).length,
+      solicitacoes: alunos.filter(a => a.status === 'aguardando').length,
+      totalLancadas: comNota.length,
+    };
   }, [alunos, valorMaximoProva]);
 
   const alunosFiltrados = useMemo(() => {
@@ -305,14 +303,9 @@ export default function NotasScreen() {
     });
   }, [alunos, busca, isCoord, filtroCoord, valorMaximoProva]);
 
-  const toastProps = {
-    feedback,
-    onFechar: fecharFeedback,
-    fundoCard: tema.fundoTopo,
-    textoPrincipal: tema.textoPrincipal,
-    textoSecundario: tema.textoSecundario,
-  };
+  const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
 
+  // === RENDERIZADOR DE ALUNO ===
   const renderAluno = ({ item }: { item: AlunoNotaItem }) => {
     const isAguardando = item.status === 'aguardando';
     const isRecusado = item.status === 'recusado';
@@ -337,7 +330,6 @@ export default function NotasScreen() {
             {isAguardando && <Text style={styles.textoAlerta}>Solicitação em análise</Text>}
             {isRecusado && isProf && <Text style={[styles.textoAlerta, { color: '#C62828' }]}>Solicitação recusada</Text>}
           </View>
-
           <View style={styles.notaArea}>
             {periodoAberto && isProf ? (
               <View style={[styles.inputNotaContainer, { borderColor: temNota ? tema.botaoPrimario : tema.borda, backgroundColor: tema.fundoBase }]}>
@@ -372,11 +364,9 @@ export default function NotasScreen() {
             )}
           </View>
         </View>
-
         <View style={[styles.barraProgressoFundo, { backgroundColor: tema.borda }]}>
           <View style={[styles.barraProgressoFill, { width: `${percentual}%`, backgroundColor: corNota }]} />
         </View>
-
         {isExpandido && (
           <View style={[styles.areaExpandida, { borderTopColor: tema.borda }]}>
             {isProf && !isAguardando && (
@@ -391,18 +381,16 @@ export default function NotasScreen() {
                   onChangeText={setTextoJustificativa}
                 />
                 <TouchableOpacity style={[styles.btnEnviarPequeno, { backgroundColor: tema.botaoPrimario }]} onPress={() => void enviarSolicitacaoProfessor(item)} disabled={salvando}>
-                  <Text style={styles.textoBotaoBranco}>{salvando ? 'Enviando...' : 'Enviar Solicitação'}</Text>
+                  <Text style={[styles.textoBotaoPequeno, { color: tema.textoBotao }]}>{salvando ? 'Enviando...' : 'Enviar Solicitação'}</Text>
                 </TouchableOpacity>
               </View>
             )}
-
             {isProf && isRecusado && (
-              <View style={[styles.boxLeitura, { backgroundColor: '#FFEBEE', borderColor: '#FFCDD2' }]}>
+              <View style={[styles.boxLeitura, { backgroundColor: '#C6282820', borderColor: '#C62828' }]}>
                 <Text style={[styles.labelMotivo, { color: '#C62828' }]}>Retificação Recusada:</Text>
-                <Text style={[styles.textoLeitura, { color: '#C62828' }]}>{item.justificativaCoord}</Text>
+                <Text style={[styles.textoLeitura, { color: tema.textoPrincipal }]}>{item.justificativaCoord}</Text>
               </View>
             )}
-
             {isCoord && isAguardando && (
               <View>
                 <View style={[styles.boxLeitura, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -434,7 +422,7 @@ export default function NotasScreen() {
                         <Text style={{ color: tema.textoSecundario, fontWeight: '600' }}>Cancelar</Text>
                       </TouchableOpacity>
                       <TouchableOpacity style={[styles.btnEnviarPequeno, { backgroundColor: '#C62828', marginTop: 0 }]} onPress={() => void responderSolicitacaoCoord(item, false)} disabled={salvando}>
-                        <Text style={styles.textoBotaoBranco}>{salvando ? 'Salvando...' : 'Confirmar Recusa'}</Text>
+                        <Text style={[styles.textoBotaoPequeno, { color: '#FFF' }]}>{salvando ? 'Salvando...' : 'Confirmar Recusa'}</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -447,8 +435,10 @@ export default function NotasScreen() {
     );
   };
 
+  // === INTERFACE ===
   return (
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: tema.fundoBase }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {/* Cabeçalho, Prazo e Busca */}
       <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.btnVoltar} accessibilityLabel="Voltar">
@@ -461,7 +451,6 @@ export default function NotasScreen() {
             </Text>
           </View>
         </View>
-
         <View style={styles.prazoContainer}>
           <View style={[styles.avisoPrazo, { backgroundColor: periodoAberto ? '#2E7D32' : '#C62828' }]}>
             <Ionicons name={periodoAberto ? 'lock-open' : 'lock-closed'} size={12} color="#FFF" />
@@ -473,19 +462,13 @@ export default function NotasScreen() {
             </TouchableOpacity>
           )}
         </View>
-
         <View style={[styles.searchContainer, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
           <Ionicons name="search" size={18} color={tema.textoSecundario} style={{ marginRight: 8 }} />
-          <TextInput
-            style={[styles.searchInput, { color: tema.textoPrincipal }]}
-            placeholder="Buscar aluno..."
-            placeholderTextColor={tema.textoSecundario}
-            value={busca}
-            onChangeText={setBusca}
-          />
+          <TextInput style={[styles.searchInput, { color: tema.textoPrincipal }]} placeholder="Buscar aluno..." placeholderTextColor={tema.textoSecundario} value={busca} onChangeText={setBusca} />
         </View>
       </View>
 
+      {/* Lista de Alunos */}
       <FlatList
         data={alunosFiltrados}
         keyExtractor={item => item.id}
@@ -517,11 +500,7 @@ export default function NotasScreen() {
                 ] as const).map(f => {
                   const ativo = filtroCoord === f.key;
                   return (
-                    <TouchableOpacity
-                      key={f.key}
-                      onPress={() => setFiltroCoord(f.key)}
-                      style={[styles.chipFiltro, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: ativo ? tema.botaoPrimario : tema.borda }]}
-                    >
+                    <TouchableOpacity key={f.key} onPress={() => setFiltroCoord(f.key)} style={[styles.chipFiltro, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: ativo ? tema.botaoPrimario : tema.borda }]}>
                       <Text style={{ color: ativo ? tema.textoBotao : tema.textoPrincipal, fontSize: 12, fontWeight: '600' }}>{f.label}</Text>
                     </TouchableOpacity>
                   );
@@ -545,30 +524,19 @@ export default function NotasScreen() {
         }
       />
 
+      {/* Rodapé Fixo de Rascunho e Lançamento (Professor) */}
       {isProf && periodoAberto && alunos.length > 0 && (
         <View style={[styles.rodapeFixoProf, { backgroundColor: tema.fundoTopo, borderTopColor: tema.borda }]}>
           <View style={styles.infoRodapeProf}>
-            <Text style={{ color: tema.textoLogo, fontSize: 13, fontWeight: '700' }}>
-              {kpis.totalLancadas} de {alunos.length} preenchidas
-            </Text>
-            <Text style={{ color: tema.textoLogo, fontSize: 11, opacity: 0.78 }} numberOfLines={1}>
-              {statusRascunhoTexto}
-            </Text>
+            <Text style={{ color: tema.textoLogo, fontSize: 13, fontWeight: '700' }}>{kpis.totalLancadas} de {alunos.length} preenchidas</Text>
+            <Text style={{ color: tema.textoLogo, fontSize: 11, opacity: 0.78 }} numberOfLines={1}>{statusRascunhoTexto}</Text>
           </View>
           <View style={styles.rowBotoesRodape}>
-            <TouchableOpacity
-              style={[styles.btnRascunhoRodape, { borderColor: tema.textoLogo }]}
-              onPress={() => void salvarTodosRascunhos()}
-              disabled={salvandoRascunho || salvando}
-            >
+            <TouchableOpacity style={[styles.btnRascunhoRodape, { borderColor: tema.textoLogo }]} onPress={() => void salvarTodosRascunhos()} disabled={salvandoRascunho || salvando}>
               <Ionicons name="save-outline" size={16} color={tema.textoLogo} />
               <Text style={{ color: tema.textoLogo, fontSize: 12, fontWeight: '700' }}>Rascunho</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.btnValidarLancar, { backgroundColor: tema.botaoPrimario }]}
-              onPress={abrirModalAssinaturaNotas}
-              disabled={salvando || salvandoRascunho}
-            >
+            <TouchableOpacity style={[styles.btnValidarLancar, { backgroundColor: tema.botaoPrimario }]} onPress={abrirModalAssinaturaNotas} disabled={salvando || salvandoRascunho}>
               <Ionicons name="shield-checkmark-outline" size={16} color={tema.textoBotao} />
               <Text style={{ color: tema.textoBotao, fontSize: 12, fontWeight: '800' }}>Validar e Lançar</Text>
             </TouchableOpacity>
@@ -576,6 +544,7 @@ export default function NotasScreen() {
         </View>
       )}
 
+      {/* Modal: Assinar e Lançar Notas */}
       <Modal visible={modalConfirmarNotas} transparent animationType="fade" onRequestClose={() => setModalConfirmarNotas(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCardCentro, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -584,26 +553,19 @@ export default function NotasScreen() {
                 <Ionicons name="shield-checkmark" size={20} color={tema.botaoPrimario} />
                 <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>Assinar e Lançar Notas</Text>
               </View>
-              <TouchableOpacity onPress={() => setModalConfirmarNotas(false)}>
-                <Ionicons name="close" size={22} color={tema.textoSecundario} />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setModalConfirmarNotas(false)}><Ionicons name="close" size={22} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
             <View style={{ padding: 20 }}>
               <View style={[styles.boxResumoModal, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
                 <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 14 }}>{tituloAvaliacao}</Text>
-                <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 2 }}>
-                  {nomeTurma} • {nomeMateria} • Valor {valorMaximoProva.toFixed(1)}
-                </Text>
-                <Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: '700', marginTop: 6 }}>
-                  {kpis.totalLancadas} de {alunos.length} aluno(s) com nota lançada
-                </Text>
+                <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 2 }}>{nomeTurma} • {nomeMateria} • Valor {valorMaximoProva.toFixed(1)}</Text>
+                <Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: '700', marginTop: 6 }}>{kpis.totalLancadas} de {alunos.length} aluno(s) com nota lançada</Text>
                 {kpis.totalLancadas < alunos.length && (
                   <Text style={{ color: '#EF6C00', fontSize: 11, marginTop: 4 }}>
                     Atenção: {alunos.length - kpis.totalLancadas} aluno(s) ainda estão sem nota (a avaliação ficará "Em andamento").
                   </Text>
                 )}
               </View>
-
               <Text style={[styles.labelMotivo, { color: tema.textoPrincipal, marginTop: 14 }]}>Confirme sua senha docente *</Text>
               <TextInput
                 value={senhaAssinatura}
@@ -613,24 +575,13 @@ export default function NotasScreen() {
                 secureTextEntry
                 style={[styles.inputSenhaModal, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]}
               />
-
               <View style={styles.rowAcoesModal}>
-                <TouchableOpacity
-                  style={[styles.btnSecModal, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}
-                  onPress={() => setModalConfirmarNotas(false)}
-                  disabled={salvando}
-                >
+                <TouchableOpacity style={[styles.btnSecModal, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]} onPress={() => setModalConfirmarNotas(false)} disabled={salvando}>
                   <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 13 }}>Cancelar</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btnPrimModal, { backgroundColor: '#2E7D32' }]}
-                  onPress={() => void confirmarELancarNotas()}
-                  disabled={salvando}
-                >
+                <TouchableOpacity style={[styles.btnPrimModal, { backgroundColor: '#2E7D32' }]} onPress={() => void confirmarELancarNotas()} disabled={salvando}>
                   <Ionicons name="checkmark-done" size={16} color="#FFF" />
-                  <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 13 }}>
-                    {salvando ? 'Salvando...' : 'Confirmar e Salvar'}
-                  </Text>
+                  <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 13 }}>{salvando ? 'Salvando...' : 'Confirmar e Salvar'}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -644,6 +595,7 @@ export default function NotasScreen() {
   );
 }
 
+// === ESTILOS ===
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { paddingTop: 50, paddingBottom: 18, paddingHorizontal: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, elevation: 5 },
@@ -685,7 +637,7 @@ const styles = StyleSheet.create({
   labelMotivo: { fontSize: 12, fontWeight: 'bold', marginBottom: 6 },
   inputJustificativa: { borderWidth: 1, borderRadius: 8, padding: 10, height: 70, textAlignVertical: 'top', fontSize: 13 },
   btnEnviarPequeno: { alignSelf: 'flex-end', marginTop: 10, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  textoBotaoBranco: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+  textoBotaoPequeno: { fontSize: 12, fontWeight: 'bold' },
   boxLeitura: { padding: 10, borderWidth: 1, borderRadius: 8, marginBottom: 10 },
   textoLeitura: { fontSize: 13, fontStyle: 'italic' },
   rowBotoesAcao: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 6 },

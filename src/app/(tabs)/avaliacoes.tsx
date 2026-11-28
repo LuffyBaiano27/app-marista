@@ -7,6 +7,7 @@ import { useDemoProfile } from '../../contexts/demoProfileContext';
 import { db } from '../../config/firebase';
 import { FeedbackToast, type EstadoFeedback, type TipoFeedback } from '../../components/FeedbackToast';
 
+// === TIPOS E CONSTANTES ===
 type StatusAvaliacao = 'pendente' | 'andamento' | 'concluido';
 type FiltroStatus = 'Todos' | StatusAvaliacao;
 type FiltroPrazoProf = 'todas' | 'aberto' | 'fechado';
@@ -47,11 +48,13 @@ const FORM_AVALIACAO_INICIAL = {
   materia: '',
 };
 
+// === HELPERS ===
 const extrairSerie = (nomeTurma: string) => {
   const limpo = String(nomeTurma || '').trim();
   if (!limpo) return 'Outros';
   return limpo.replace(/\s+[A-Z]$/i, '').trim() || limpo;
 };
+
 const formatarDataInput = (valor: string) => {
   const nums = valor.replace(/\D/g, '').slice(0, 8);
   if (nums.length <= 2) return nums;
@@ -65,12 +68,12 @@ export default function AvaliacoesScreen() {
   const isCoord = perfil === 'coordenador';
   const isProf = perfil === 'professor';
 
+  // === ESTADOS ===
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoItem[]>([]);
   const [turmasBanco, setTurmasBanco] = useState<any[]>([]);
   const [professoresBanco, setProfessoresBanco] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
-
   const [busca, setBusca] = useState('');
   const [bimestreFiltro, setBimestreFiltro] = useState<(typeof FILTROS_BIMESTRE)[number]>('Todos');
   const [statusFiltro, setStatusFiltro] = useState<FiltroStatus>('Todos');
@@ -78,7 +81,6 @@ export default function AvaliacoesScreen() {
   const [serieFiltro, setSerieFiltro] = useState('Todas');
   const [pastasAbertas, setPastasAbertas] = useState<string[]>([]);
   const [excluindoId, setExcluindoId] = useState<string | null>(null);
-
   const [modalFiltro, setModalFiltro] = useState(false);
   const [modalNovaAv, setModalNovaAv] = useState(false);
   const [dropTurmaAberto, setDropTurmaAberto] = useState(false);
@@ -91,6 +93,7 @@ export default function AvaliacoesScreen() {
   }, []);
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
 
+  // === CARREGAMENTO DE DADOS (FIRESTORE) ===
   const buscarDadosAvaliacoes = useCallback(async () => {
     setCarregando(true);
     try {
@@ -115,49 +118,36 @@ export default function AvaliacoesScreen() {
       });
 
       if (isProf) {
-        listaAv = listaAv.filter(
-          a => a.professorId === ID_PROFESSOR_DEMO || a.professor.toLowerCase().includes('luffy')
-        );
-        listaAv.sort((a, b) => {
-          if (a.statusPrazo !== b.statusPrazo) return a.statusPrazo === 'aberto' ? -1 : 1;
-          return a.turma.localeCompare(b.turma, 'pt-BR');
-        });
+        listaAv = listaAv.filter(a => a.professorId === ID_PROFESSOR_DEMO || a.professor.toLowerCase().includes('luffy'));
+        listaAv.sort((a, b) => (a.statusPrazo !== b.statusPrazo ? (a.statusPrazo === 'aberto' ? -1 : 1) : a.turma.localeCompare(b.turma, 'pt-BR')));
       } else {
         listaAv.sort((a, b) => a.turma.localeCompare(b.turma, 'pt-BR'));
       }
       setAvaliacoes(listaAv);
 
       if (isCoord) {
-        const [turmasSnap, usersSnap] = await Promise.all([
-          getDocs(collection(db, 'turmas')),
-          getDocs(collection(db, 'usuarios')),
-        ]);
-        const listaTurmas = turmasSnap.docs
-          .map(d => ({ id: d.id, ...(d.data() as any) }))
-          .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'));
-        setTurmasBanco(listaTurmas);
-
-        const listaProfs = usersSnap.docs
-          .map(d => ({ id: d.id, ...(d.data() as any) }))
-          .filter(u => {
-            const cargo = String(u.role ?? u.perfil ?? '').toLowerCase();
-            const ativo = u.ativo !== false && u.situacao !== 'Inativo';
-            return cargo.includes('prof') && ativo;
-          })
-          .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'));
-        setProfessoresBanco(listaProfs);
+        const [turmasSnap, usersSnap] = await Promise.all([getDocs(collection(db, 'turmas')), getDocs(collection(db, 'usuarios'))]);
+        setTurmasBanco(turmasSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR')));
+        setProfessoresBanco(
+          usersSnap.docs
+            .map(d => ({ id: d.id, ...(d.data() as any) }))
+            .filter(u => {
+              const cargo = String(u.role ?? u.perfil ?? '').toLowerCase();
+              return cargo.includes('prof') && u.ativo !== false && u.situacao !== 'Inativo';
+            })
+            .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'))
+        );
       }
     } catch (error: any) {
       notificar('erro', 'Erro ao carregar avaliações', error?.message || 'Falha ao consultar o Firestore.');
-    } finally { setCarregando(false); }
+    } finally {
+      setCarregando(false);
+    }
   }, [isCoord, isProf, notificar]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void buscarDadosAvaliacoes();
-    }, [buscarDadosAvaliacoes])
-  );
+  useFocusEffect(useCallback(() => { void buscarDadosAvaliacoes(); }, [buscarDadosAvaliacoes]));
 
+  // === FILTROS E KPIS ===
   const seriesDisponiveis = useMemo(() => {
     const setSeries = new Set<string>();
     avaliacoes.forEach(a => setSeries.add(extrairSerie(a.turma)));
@@ -172,14 +162,11 @@ export default function AvaliacoesScreen() {
       if (serieFiltro !== 'Todas' && extrairSerie(a.turma) !== serieFiltro) return false;
       if (isProf) {
         if (prazoFiltroProf !== 'todas' && a.statusPrazo !== prazoFiltroProf) return false;
-      } else {
-        if (statusFiltro !== 'Todos' && a.status !== statusFiltro) return false;
+      } else if (statusFiltro !== 'Todos' && a.status !== statusFiltro) {
+        return false;
       }
       if (!termo) return true;
-      return a.titulo.toLowerCase().includes(termo) ||
-        a.turma.toLowerCase().includes(termo) ||
-        a.materia.toLowerCase().includes(termo) ||
-        a.professor.toLowerCase().includes(termo);
+      return [a.titulo, a.turma, a.materia, a.professor].some(v => v.toLowerCase().includes(termo));
     });
   }, [avaliacoes, busca, bimestreFiltro, statusFiltro, prazoFiltroProf, serieFiltro, isProf]);
 
@@ -192,25 +179,11 @@ export default function AvaliacoesScreen() {
   }), [avaliacoesFiltradas, avaliacoes]);
 
   const temFiltroAtivo = bimestreFiltro !== 'Todos' || serieFiltro !== 'Todas' || (!isProf && statusFiltro !== 'Todos');
+  const limparFiltros = () => { setBimestreFiltro('Todos'); setStatusFiltro('Todos'); setSerieFiltro('Todas'); };
+  const togglePasta = (id: string) => { setExcluindoId(null); setPastasAbertas(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])); };
+  const abrirModalNovaAvaliacao = () => { setFormAv(FORM_AVALIACAO_INICIAL); setDropTurmaAberto(false); setDropProfAberto(false); setModalNovaAv(true); };
 
-  const limparFiltros = () => {
-    setBimestreFiltro('Todos');
-    setStatusFiltro('Todos');
-    setSerieFiltro('Todas');
-  };
-
-  const togglePasta = (id: string) => {
-    setExcluindoId(null);
-    setPastasAbertas(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
-  };
-
-  const abrirModalNovaAvaliacao = () => {
-    setFormAv(FORM_AVALIACAO_INICIAL);
-    setDropTurmaAberto(false);
-    setDropProfAberto(false);
-    setModalNovaAv(true);
-  };
-
+  // === AÇÕES FIRESTORE ===
   const salvarNovaAvaliacao = async () => {
     const valorNum = Number(formAv.valorMaximo.replace(',', '.'));
     if (!formAv.titulo.trim()) return notificar('aviso', 'Campo obrigatório', 'Informe o título da avaliação.');
@@ -242,7 +215,9 @@ export default function AvaliacoesScreen() {
       notificar('sucesso', 'Avaliação agendada!', `${formAv.titulo.trim()} • ${formAv.turmaNome} (Valor ${valorNum.toFixed(1)}).`);
     } catch (error: any) {
       notificar('erro', 'Erro ao agendar', error?.message || 'Não foi possível salvar no Firestore.');
-    } finally { setOcupado(false); }
+    } finally {
+      setOcupado(false);
+    }
   };
 
   const alternarEncerramento = async (item: AvaliacaoItem) => {
@@ -256,7 +231,9 @@ export default function AvaliacoesScreen() {
       notificar('sucesso', encerrar ? 'Avaliação encerrada' : 'Avaliação reaberta', `${item.titulo} (${item.turma}) atualizada.`);
     } catch (error: any) {
       notificar('erro', 'Erro ao atualizar', error?.message || 'Falha ao atualizar status.');
-    } finally { setOcupado(false); }
+    } finally {
+      setOcupado(false);
+    }
   };
 
   const cobrarProfessor = async (item: AvaliacaoItem) => {
@@ -274,14 +251,13 @@ export default function AvaliacoesScreen() {
       notificar('sucesso', 'Lembrete privado enviado!', `Cobrança registrada exclusivamente para ${item.professor}.`);
     } catch (error: any) {
       notificar('erro', 'Erro ao cobrar', error?.message || 'Não foi possível registrar o lembrete.');
-    } finally { setOcupado(false); }
+    } finally {
+      setOcupado(false);
+    }
   };
 
   const excluirAvaliacao = async (item: AvaliacaoItem) => {
-    if (excluindoId !== item.id) {
-      setExcluindoId(item.id);
-      return;
-    }
+    if (excluindoId !== item.id) return setExcluindoId(item.id);
     setOcupado(true);
     try {
       await deleteDoc(doc(db, 'avaliacoes', item.id));
@@ -290,7 +266,9 @@ export default function AvaliacoesScreen() {
       notificar('sucesso', 'Avaliação excluída', `${item.titulo} (${item.turma}) removida.`);
     } catch (error: any) {
       notificar('erro', 'Erro ao excluir', error?.message || 'Não foi possível excluir a avaliação.');
-    } finally { setOcupado(false); }
+    } finally {
+      setOcupado(false);
+    }
   };
 
   const abrirPlanilhaNotas = (item: AvaliacaoItem) => {
@@ -307,48 +285,29 @@ export default function AvaliacoesScreen() {
     });
   };
 
-  const toastProps = {
-    feedback,
-    onFechar: fecharFeedback,
-    fundoCard: tema.fundoTopo,
-    textoPrincipal: tema.textoPrincipal,
-    textoSecundario: tema.textoSecundario,
-  };
+  const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
 
+  // === RENDERIZADORES ===
   const renderCardProfessor = ({ item }: { item: AvaliacaoItem }) => {
     const isOpen = item.statusPrazo === 'aberto';
     const corStatus = isOpen ? '#2E7D32' : '#C62828';
     return (
-      <TouchableOpacity
-        style={[styles.cardProf, { backgroundColor: tema.inputBackground, borderColor: tema.borda, borderLeftColor: corStatus }]}
-        activeOpacity={0.78}
-        onPress={() => abrirPlanilhaNotas(item)}
-      >
+      <TouchableOpacity style={[styles.cardProf, { backgroundColor: tema.inputBackground, borderColor: tema.borda, borderLeftColor: corStatus }]} activeOpacity={0.78} onPress={() => abrirPlanilhaNotas(item)}>
         <View style={styles.cardHeader}>
-          <Text style={[styles.cardTitle, { color: tema.textoPrincipal }]} numberOfLines={1}>
-            {item.turma} • {item.materia}
-          </Text>
+          <Text style={[styles.cardTitle, { color: tema.textoPrincipal }]} numberOfLines={1}>{item.turma} • {item.materia}</Text>
           <View style={[styles.pillStatus, { backgroundColor: corStatus + '20' }]}>
-            <Text style={{ color: corStatus, fontSize: 11, fontWeight: '800' }}>
-              {isOpen ? 'Prazo Aberto' : 'Encerrado'}
-            </Text>
+            <Text style={{ color: corStatus, fontSize: 11, fontWeight: '800' }}>{isOpen ? 'Prazo Aberto' : 'Encerrado'}</Text>
           </View>
         </View>
-        <Text style={[styles.cardSub, { color: tema.textoSecundario, marginBottom: 10 }]}>
-          {item.titulo} • {item.bimestre} • Valor {item.valorMaximo.toFixed(1)}
-        </Text>
+        <Text style={[styles.cardSub, { color: tema.textoSecundario }]}>{item.titulo} • {item.bimestre} • Valor {item.valorMaximo.toFixed(1)}</Text>
         <View style={styles.linhaRodapeProf}>
           <View style={styles.infoMini}>
             <Ionicons name="calendar-outline" size={14} color={isOpen ? tema.botaoPrimario : tema.textoSecundario} />
-            <Text style={[styles.infoText, { color: isOpen ? tema.botaoPrimario : tema.textoSecundario, fontWeight: '700' }]}>
-              Até {item.prazo}
-            </Text>
+            <Text style={[styles.infoText, { color: isOpen ? tema.botaoPrimario : tema.textoSecundario, fontWeight: '700' }]}>Até {item.prazo}</Text>
           </View>
           <View style={[styles.btnAcaoProfMini, { backgroundColor: isOpen ? tema.botaoPrimario : 'transparent', borderColor: isOpen ? tema.botaoPrimario : tema.borda }]}>
             <Ionicons name={isOpen ? 'create-outline' : 'eye-outline'} size={14} color={isOpen ? tema.textoBotao : tema.textoPrincipal} />
-            <Text style={{ color: isOpen ? tema.textoBotao : tema.textoPrincipal, fontSize: 12, fontWeight: '700' }}>
-              {isOpen ? 'Lançar Notas' : 'Ver / Retificar'}
-            </Text>
+            <Text style={{ color: isOpen ? tema.textoBotao : tema.textoPrincipal, fontSize: 12, fontWeight: '700' }}>{isOpen ? 'Lançar Notas' : 'Ver / Retificar'}</Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -362,11 +321,7 @@ export default function AvaliacoesScreen() {
     const statusTexto = item.status === 'concluido' ? 'Concluído' : item.status === 'andamento' ? 'Em andamento' : 'Pendente';
     return (
       <View style={{ marginBottom: 12 }}>
-        <TouchableOpacity
-          style={[styles.cardPasta, { backgroundColor: tema.inputBackground, borderColor: aberta ? tema.botaoPrimario : tema.borda }]}
-          activeOpacity={0.75}
-          onPress={() => togglePasta(item.id)}
-        >
+        <TouchableOpacity style={[styles.cardPasta, { backgroundColor: tema.inputBackground, borderColor: aberta ? tema.botaoPrimario : tema.borda }]} activeOpacity={0.75} onPress={() => togglePasta(item.id)}>
           <View style={styles.cardHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
               <Ionicons name={aberta ? 'folder-open' : 'folder'} size={20} color={tema.botaoPrimario} />
@@ -376,9 +331,7 @@ export default function AvaliacoesScreen() {
               <Text style={{ color: statusCor, fontSize: 11, fontWeight: '800' }}>{statusTexto}</Text>
             </View>
           </View>
-          <Text style={[styles.cardSub, { color: tema.textoSecundario, marginBottom: 6 }]}>
-            {item.titulo} • {item.bimestre} • Valor {item.valorMaximo.toFixed(1)}
-          </Text>
+          <Text style={[styles.cardSub, { color: tema.textoSecundario, marginBottom: 6 }]}>{item.titulo} • {item.bimestre} • Valor {item.valorMaximo.toFixed(1)}</Text>
           <View style={styles.linhaRodapeCard}>
             <View style={styles.infoMini}>
               <Ionicons name="person-outline" size={14} color={tema.icone} />
@@ -393,42 +346,23 @@ export default function AvaliacoesScreen() {
         {aberta && (
           <View style={[styles.conteudoPasta, { borderLeftColor: tema.borda }]}>
             <View style={styles.rowAcoesPasta}>
-              <TouchableOpacity
-                style={[styles.btnAcaoPasta, { backgroundColor: tema.botaoPrimario }]}
-                onPress={() => abrirPlanilhaNotas(item)}
-              >
+              <TouchableOpacity style={[styles.btnAcaoPasta, { backgroundColor: tema.botaoPrimario }]} onPress={() => abrirPlanilhaNotas(item)}>
                 <Ionicons name="document-text-outline" size={15} color={tema.textoBotao} />
                 <Text style={{ color: tema.textoBotao, fontSize: 12, fontWeight: '700' }}>Ver Notas</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btnAcaoPasta, { backgroundColor: tema.inputBackground, borderColor: tema.borda, borderWidth: 1 }]}
-                onPress={() => void cobrarProfessor(item)}
-                disabled={ocupado}
-              >
+              <TouchableOpacity style={[styles.btnAcaoPasta, { backgroundColor: tema.inputBackground, borderColor: tema.borda, borderWidth: 1 }]} onPress={() => void cobrarProfessor(item)} disabled={ocupado}>
                 <Ionicons name="notifications-outline" size={15} color={tema.botaoPrimario} />
                 <Text style={{ color: tema.textoPrincipal, fontSize: 12, fontWeight: '700' }}>Cobrar Prof.</Text>
               </TouchableOpacity>
             </View>
             <View style={[styles.rowAcoesPasta, { marginTop: 8 }]}>
-              <TouchableOpacity
-                style={[styles.btnAcaoPasta, { backgroundColor: tema.inputBackground, borderColor: tema.borda, borderWidth: 1 }]}
-                onPress={() => void alternarEncerramento(item)}
-                disabled={ocupado}
-              >
+              <TouchableOpacity style={[styles.btnAcaoPasta, { backgroundColor: tema.inputBackground, borderColor: tema.borda, borderWidth: 1 }]} onPress={() => void alternarEncerramento(item)} disabled={ocupado}>
                 <Ionicons name={item.status === 'concluido' ? 'lock-open-outline' : 'checkmark-done-outline'} size={15} color={item.status === 'concluido' ? '#EF6C00' : '#2E7D32'} />
-                <Text style={{ color: tema.textoPrincipal, fontSize: 12, fontWeight: '700' }}>
-                  {item.status === 'concluido' ? 'Reabrir' : 'Encerrar'}
-                </Text>
+                <Text style={{ color: tema.textoPrincipal, fontSize: 12, fontWeight: '700' }}>{item.status === 'concluido' ? 'Reabrir' : 'Encerrar'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btnAcaoPasta, { backgroundColor: confirmandoExclusao ? '#C6282820' : tema.inputBackground, borderColor: confirmandoExclusao ? '#C62828' : tema.borda, borderWidth: 1 }]}
-                onPress={() => void excluirAvaliacao(item)}
-                disabled={ocupado}
-              >
+              <TouchableOpacity style={[styles.btnAcaoPasta, { backgroundColor: confirmandoExclusao ? '#C6282820' : tema.inputBackground, borderColor: confirmandoExclusao ? '#C62828' : tema.borda, borderWidth: 1 }]} onPress={() => void excluirAvaliacao(item)} disabled={ocupado}>
                 <Ionicons name={confirmandoExclusao ? 'checkmark-circle' : 'trash-outline'} size={15} color="#C62828" />
-                <Text style={{ color: '#C62828', fontSize: 12, fontWeight: '700' }}>
-                  {confirmandoExclusao ? 'Confirmar' : 'Excluir'}
-                </Text>
+                <Text style={{ color: '#C62828', fontSize: 12, fontWeight: '700' }}>{confirmandoExclusao ? 'Confirmar' : 'Excluir'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -437,8 +371,10 @@ export default function AvaliacoesScreen() {
     );
   };
 
+  // === INTERFACE ===
   return (
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: tema.fundoBase }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {/* Cabeçalho e Busca */}
       <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
         <View style={styles.headerTopRow}>
           <View style={{ flex: 1 }}>
@@ -453,14 +389,11 @@ export default function AvaliacoesScreen() {
               <Text style={{ color: tema.textoBotao, fontSize: 12, fontWeight: '700' }}>Nova</Text>
             </TouchableOpacity>
           ) : (
-            <View style={[styles.badgePerfil, { backgroundColor: 'rgba(255,255,255,0.16)' }]}>
-              <Text style={[styles.perfilAtivo, { color: tema.textoLogo }]}>
-                {perfil === 'admin' ? 'Administrador' : 'Professor'}
-              </Text>
+            <View style={styles.badgePerfil}>
+              <Text style={[styles.perfilAtivo, { color: tema.textoLogo }]}>{perfil === 'admin' ? 'Administrador' : 'Professor'}</Text>
             </View>
           )}
         </View>
-
         <View style={styles.rowBuscaFiltro}>
           <View style={[styles.searchContainer, { flex: 1, backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
             <Ionicons name="search" size={18} color={tema.textoSecundario} style={{ marginRight: 8 }} />
@@ -472,11 +405,7 @@ export default function AvaliacoesScreen() {
               onChangeText={setBusca}
             />
           </View>
-          <TouchableOpacity
-            style={[styles.btnFiltroHeader, { backgroundColor: temFiltroAtivo ? tema.botaoPrimario : tema.inputBackground, borderColor: temFiltroAtivo ? tema.botaoPrimario : tema.borda }]}
-            onPress={() => setModalFiltro(true)}
-            accessibilityLabel="Filtrar avaliações"
-          >
+          <TouchableOpacity style={[styles.btnFiltroHeader, { backgroundColor: temFiltroAtivo ? tema.botaoPrimario : tema.inputBackground, borderColor: temFiltroAtivo ? tema.botaoPrimario : tema.borda }]} onPress={() => setModalFiltro(true)} accessibilityLabel="Filtrar avaliações">
             <Ionicons name="options-outline" size={20} color={temFiltroAtivo ? tema.textoBotao : tema.textoPrincipal} />
           </TouchableOpacity>
         </View>
@@ -485,22 +414,21 @@ export default function AvaliacoesScreen() {
             <Text style={{ color: tema.textoLogo, fontSize: 12, opacity: 0.9 }}>
               Filtro: <Text style={{ fontWeight: '700' }}>{bimestreFiltro} • {serieFiltro}{!isProf ? ` • ${statusFiltro}` : ''}</Text>
             </Text>
-            <TouchableOpacity onPress={limparFiltros}>
-              <Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: 'bold' }}>Limpar</Text>
-            </TouchableOpacity>
+            <TouchableOpacity onPress={limparFiltros}><Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: 'bold' }}>Limpar</Text></TouchableOpacity>
           </View>
         )}
       </View>
 
-      {isProf ? (
-        <FlatList
-          data={avaliacoesFiltradas}
-          keyExtractor={item => item.id}
-          renderItem={renderCardProfessor}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosAvaliacoes()} tintColor={tema.botaoPrimario} />}
-          ListHeaderComponent={
+      {/* Lista Principal (Professor ou Coordenador) */}
+      <FlatList
+        data={avaliacoesFiltradas}
+        keyExtractor={item => item.id}
+        renderItem={isProf ? renderCardProfessor : renderPastaCoordenador}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosAvaliacoes()} tintColor={tema.botaoPrimario} />}
+        ListHeaderComponent={
+          isProf ? (
             <View>
               <View style={styles.resumoRow}>
                 {[
@@ -523,41 +451,14 @@ export default function AvaliacoesScreen() {
                 ] as const).map(f => {
                   const ativo = prazoFiltroProf === f.key;
                   return (
-                    <TouchableOpacity
-                      key={f.key}
-                      onPress={() => setPrazoFiltroProf(f.key)}
-                      style={[styles.chipFiltroProf, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: ativo ? tema.botaoPrimario : tema.borda }]}
-                    >
+                    <TouchableOpacity key={f.key} onPress={() => setPrazoFiltroProf(f.key)} style={[styles.chipFiltroProf, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: ativo ? tema.botaoPrimario : tema.borda }]}>
                       <Text style={{ color: ativo ? tema.textoBotao : tema.textoPrincipal, fontSize: 12, fontWeight: '700' }}>{f.label}</Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
             </View>
-          }
-          ListEmptyComponent={
-            carregando ? (
-              <ActivityIndicator size="large" color={tema.botaoPrimario} style={{ marginTop: 30 }} />
-            ) : (
-              <View style={{ alignItems: 'center', marginTop: 30 }}>
-                <Ionicons name="document-text-outline" size={40} color={tema.textoSecundario} />
-                <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 15, marginTop: 10 }}>Nenhuma avaliação encontrada</Text>
-                <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 4, textAlign: 'center' }}>
-                  As avaliações agendadas pela coordenação para você aparecerão aqui.
-                </Text>
-              </View>
-            )
-          }
-        />
-      ) : (
-        <FlatList
-          data={avaliacoesFiltradas}
-          keyExtractor={item => item.id}
-          renderItem={renderPastaCoordenador}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosAvaliacoes()} tintColor={tema.botaoPrimario} />}
-          ListHeaderComponent={
+          ) : (
             <View style={styles.resumoRow}>
               {[
                 { label: 'Concluídas', valor: kpis.concluidas, cor: '#2E7D32', icone: 'checkmark-done-outline' as const },
@@ -571,23 +472,24 @@ export default function AvaliacoesScreen() {
                 </View>
               ))}
             </View>
-          }
-          ListEmptyComponent={
-            carregando ? (
-              <ActivityIndicator size="large" color={tema.botaoPrimario} style={{ marginTop: 30 }} />
-            ) : (
-              <View style={{ alignItems: 'center', marginTop: 30 }}>
-                <Ionicons name="document-text-outline" size={40} color={tema.textoSecundario} />
-                <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 15, marginTop: 10 }}>Nenhuma avaliação encontrada</Text>
-                <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 4, textAlign: 'center' }}>
-                  Toque em "+ Nova" no topo para agendar uma avaliação.
-                </Text>
-              </View>
-            )
-          }
-        />
-      )}
+          )
+        }
+        ListEmptyComponent={
+          carregando ? (
+            <ActivityIndicator size="large" color={tema.botaoPrimario} style={{ marginTop: 30 }} />
+          ) : (
+            <View style={{ alignItems: 'center', marginTop: 30 }}>
+              <Ionicons name="document-text-outline" size={40} color={tema.textoSecundario} />
+              <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 15, marginTop: 10 }}>Nenhuma avaliação encontrada</Text>
+              <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 4, textAlign: 'center' }}>
+                {isProf ? 'As avaliações agendadas pela coordenação para você aparecerão aqui.' : 'Toque em "+ Nova" no topo para agendar uma avaliação.'}
+              </Text>
+            </View>
+          )
+        }
+      />
 
+      {/* Modal: Filtros */}
       <Modal visible={modalFiltro} transparent animationType="slide" onRequestClose={() => setModalFiltro(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -645,6 +547,7 @@ export default function AvaliacoesScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Nova Avaliação (Coordenador) */}
       <Modal visible={modalNovaAv} transparent animationType="slide" onRequestClose={() => setModalNovaAv(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -717,6 +620,7 @@ export default function AvaliacoesScreen() {
   );
 }
 
+// === ESTILOS ===
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { paddingTop: 56, paddingBottom: 20, paddingHorizontal: 20, borderBottomLeftRadius: 22, borderBottomRightRadius: 22, elevation: 5 },
@@ -724,7 +628,7 @@ const styles = StyleSheet.create({
   btnAddTopo: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, gap: 4 },
   titulo: { fontSize: 22, fontWeight: 'bold' },
   subtitulo: { fontSize: 13, marginTop: 3 },
-  badgePerfil: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  badgePerfil: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: 'rgba(124, 124, 255, 0.18)', borderWidth: 1, borderColor: 'rgba(165, 158, 196, 0.25)' },
   perfilAtivo: { fontSize: 11, fontWeight: 'bold' },
   rowBuscaFiltro: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
   searchContainer: { flexDirection: 'row', alignItems: 'center', height: 44, borderRadius: 10, borderWidth: 1, paddingHorizontal: 12 },

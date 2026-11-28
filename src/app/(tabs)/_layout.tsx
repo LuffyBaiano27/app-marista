@@ -1,20 +1,45 @@
-import React from 'react';
-import { Tabs } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
+import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../../config/firebase';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
 
 const CONFIGURACAO_ABAS = {
-  index: { titulo: 'Início', icone: 'home' as const },
-  usuarios: { titulo: 'Usuários', icone: 'people' as const },
-  turmas: { titulo: 'Turmas', icone: 'people' as const },
-  chamados: { titulo: 'Chamados', icone: 'construct' as const },
-  historico: { titulo: 'Histórico', icone: 'time' as const },
-  avaliacoes: { titulo: 'Avaliações', icone: 'document-text' as const },
-  perfil: { titulo: 'Perfil', icone: 'person' as const },
+  index: { titulo: 'Início', iconeAtivo: 'home' as const, iconeInativo: 'home-outline' as const },
+  usuarios: { titulo: 'Usuários', iconeAtivo: 'people' as const, iconeInativo: 'people-outline' as const },
+  turmas: { titulo: 'Turmas', iconeAtivo: 'school' as const, iconeInativo: 'school-outline' as const },
+  chamados: { titulo: 'Chamados', iconeAtivo: 'construct' as const, iconeInativo: 'construct-outline' as const },
+  historico: { titulo: 'Histórico', iconeAtivo: 'time' as const, iconeInativo: 'time-outline' as const },
+  avaliacoes: { titulo: 'Avaliações', iconeAtivo: 'document-text' as const, iconeInativo: 'document-text-outline' as const },
+  perfil: { titulo: 'Perfil', iconeAtivo: 'person' as const, iconeInativo: 'person-outline' as const },
 };
 
 export default function TabLayout() {
+  const router = useRouter();
   const { perfil, temaAtivo: tema } = useDemoProfile();
+  const [autenticado, setAutenticado] = useState(Boolean(auth.currentUser));
+  const isEscuro = tema.fundoBase !== '#FFFFFF';
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, user => {
+      if (!user) {
+        setAutenticado(false);
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.location.replace('/');
+        } else {
+          router.replace('/');
+        }
+      } else {
+        setAutenticado(true);
+      }
+    });
+    return unsubscribe;
+  }, [router]);
+
+  if (!autenticado) return null;
+
   const ordemAbas = perfil === 'admin'
     ? ['index', 'usuarios', 'turmas', 'chamados', 'historico', 'avaliacoes', 'perfil'] as const
     : ['index', 'turmas', 'usuarios', 'chamados', 'historico', 'avaliacoes', 'perfil'] as const;
@@ -24,12 +49,18 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor: tema.botaoPrimario,
         tabBarInactiveTintColor: tema.textoSecundario,
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '700',
+        },
         tabBarStyle: {
-          backgroundColor: tema.fundoBase,
+          backgroundColor: isEscuro ? tema.fundoTopo : tema.fundoBase,
           borderTopColor: tema.borda,
-          height: 60,
+          borderTopWidth: 1,
+          height: 64,
           paddingBottom: 10,
-          paddingTop: 5,
+          paddingTop: 6,
+          elevation: 8,
         },
         headerShown: false,
       }}
@@ -53,10 +84,10 @@ export default function TabLayout() {
               title: titulo,
               href: ocultar ? null : undefined,
               tabBarItemStyle: esconderDaBarra ? { display: 'none' } : undefined,
-              tabBarIcon: ({ color }) => (
+              tabBarIcon: ({ color, focused }) => (
                 <Ionicons
-                  name={configuracao.icone}
-                  size={24}
+                  name={focused ? configuracao.iconeAtivo : configuracao.iconeInativo}
+                  size={23}
                   color={typeof color === 'string' ? color : undefined}
                 />
               ),

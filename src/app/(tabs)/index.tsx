@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useWindowDimensions, Modal, FlatList, RefreshControl, ActivityIndicator, TextInput, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useWindowDimensions, Modal, FlatList, RefreshControl, ActivityIndicator, TextInput, Platform, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { collection, getDocs, addDoc, updateDoc, doc, increment, query, where, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, setDoc, updateDoc, doc, increment, query, where, serverTimestamp } from 'firebase/firestore';
 import { useDemoProfile, type DemoProfile } from '../../contexts/demoProfileContext';
-import { db } from '../../config/firebase';
+import { auth, db, criarContaAuthSemDeslogar } from '../../config/firebase';
 import { FeedbackToast, type EstadoFeedback, type TipoFeedback } from '../../components/FeedbackToast';
 
+// === CONSTANTES E FORMULÁRIOS INICIAIS ===
+const ICONE_VIOLETA = require('../../../assets/images/icon.png');
 const PERFIS_DEMONSTRATIVOS: Record<DemoProfile, { nome: string; cargo: string }> = {
   admin: { nome: 'Marina', cargo: 'Administradora' },
   coordenador: { nome: 'Camila', cargo: 'Coordenadora' },
@@ -23,7 +25,7 @@ const FRASES = [
 ];
 const CORES_MATERIA: Record<string, { bg: string; text: string }> = {
   Matemática: { bg: '#FFCC80', text: '#E65100' },
-  Física: { bg: '#90CAF9', text: '#0D47A1' },
+  Física: { bg: '#C7D2FE', text: '#312E81' },
   História: { bg: '#A5D6A7', text: '#1B5E20' },
 };
 const FORM_ALUNO_INICIAL = {
@@ -33,6 +35,7 @@ const FORM_ALUNO_INICIAL = {
 const FORM_GRADE_INICIAL = { professorId: '', professorNome: '', disciplina: '', turmaId: '', turmaNome: '', turno: 'Matutino', diaId: 1, horaInicio: '', horaFim: '' };
 const FORM_COMUNICADO_INICIAL = { titulo: '', destinatario: 'Todos os Professores', mensagem: '' };
 
+// === HELPERS DE FORMATAÇÃO E VALIDAÇÃO ===
 const gerarSenhaInicial = (nome: string, cpf: string) => {
   const prefixo = nome.trim().split(/\s+/)[0].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().slice(0, 4) || 'user';
   const sufixo = cpf.replace(/\D/g, '').slice(0, 4) || '2026';
@@ -40,8 +43,7 @@ const gerarSenhaInicial = (nome: string, cpf: string) => {
 };
 const extrairSerie = (nomeTurma: string) => {
   const limpo = String(nomeTurma || '').trim();
-  if (!limpo) return 'Outros';
-  return limpo.replace(/\s+[A-Z]$/i, '').trim() || limpo;
+  return limpo ? limpo.replace(/\s+[A-Z]$/i, '').trim() || limpo : 'Outros';
 };
 const formatarDataInput = (valor: string) => {
   const nums = valor.replace(/\D/g, '').slice(0, 8);
@@ -57,32 +59,32 @@ const formatarTelefoneInput = (valor: string) => {
 };
 const formatarHoraInput = (valor: string) => {
   const nums = valor.replace(/\D/g, '').slice(0, 4);
-  if (nums.length <= 2) return nums;
-  return `${nums.slice(0, 2)}:${nums.slice(2)}`;
+  return nums.length <= 2 ? nums : `${nums.slice(0, 2)}:${nums.slice(2)}`;
 };
 const validarHora24 = (horaStr: string) => {
   if (!/^\d{2}:\d{2}$/.test(horaStr)) return null;
   const [h, m] = horaStr.split(':').map(Number);
-  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
-  return h * 60 + m;
+  return h < 0 || h > 23 || m < 0 || m > 59 ? null : h * 60 + m;
 };
 const obterTurnoPorHora = (horaStr: string) => {
   const mins = validarHora24(horaStr);
   if (mins === null) return null;
   const h = Math.floor(mins / 60);
-  if (h >= 18) return 'Noturno';
-  if (h >= 12) return 'Vespertino';
-  return 'Matutino';
+  return h >= 18 ? 'Noturno' : h >= 12 ? 'Vespertino' : 'Matutino';
 };
 const getDataDeHoje = () => new Date().toISOString().split('T')[0];
 
 export default function DashboardScreen() {
   const router = useRouter();
-  const { perfil, temaAtivo: tema } = useDemoProfile();
+  const { perfil, perfilReal, usuarioLogado, temaAtivo: tema } = useDemoProfile();
   const { width: larguraTela } = useWindowDimensions();
-  const perfilDemo = PERFIS_DEMONSTRATIVOS[perfil];
+  const perfilDemo = {
+    ...PERFIS_DEMONSTRATIVOS[perfil],
+    ...(perfil === perfilReal && usuarioLogado ? { nome: usuarioLogado.nome } : {}),
+  };
   const larguraColunaDia = Math.min(240, Math.max(190, larguraTela * 0.62));
 
+  // === ESTADOS ===
   const [saudacaoTempo, setSaudacaoTempo] = useState('Olá');
   const [fraseMotivacional, setFraseMotivacional] = useState(FRASES[0]);
   const [todasTurmas, setTodasTurmas] = useState<any[]>([]);
@@ -98,7 +100,9 @@ export default function DashboardScreen() {
   const [carregando, setCarregando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [ultimaSinc, setUltimaSinc] = useState('');
+  const [salvando, setSalvando] = useState(false);
 
+  // Modais e dropdowns
   const [modalNotificacoes, setModalNotificacoes] = useState(false);
   const [modalUsuario, setModalUsuario] = useState(false);
   const [modalTurma, setModalTurma] = useState(false);
@@ -106,14 +110,13 @@ export default function DashboardScreen() {
   const [modalGradeCoord, setModalGradeCoord] = useState(false);
   const [modalComunicadoCoord, setModalComunicadoCoord] = useState(false);
   const [modalAlertasCoord, setModalAlertasCoord] = useState(false);
-
   const [dropdownSerieAberto, setDropdownSerieAberto] = useState(false);
   const [dropdownSalaAberto, setDropdownSalaAberto] = useState(false);
   const [dropdownProfAberto, setDropdownProfAberto] = useState(false);
   const [dropdownTurmaGradeAberto, setDropdownTurmaGradeAberto] = useState(false);
   const [dropdownDestinatarioAberto, setDropdownDestinatarioAberto] = useState(false);
 
-  const [salvando, setSalvando] = useState(false);
+  // Formulários e feedback
   const [formUser, setFormUser] = useState({ nome: '', email: '', cpf: '', role: 'professor' as 'professor' | 'coordenador', disciplina: '' });
   const [formTurma, setFormTurma] = useState({ nome: '', turno: 'Matutino' as (typeof TURNOS)[number] });
   const [formAluno, setFormAluno] = useState(FORM_ALUNO_INICIAL);
@@ -128,18 +131,15 @@ export default function DashboardScreen() {
   const totalNaoLidas = comunicados.filter(c => !notificacoesLidasIds.includes(c.id)).length;
   const diaAtual = new Date().getDay();
   const diaBusca = diaAtual === 0 || diaAtual === 6 ? 1 : diaAtual;
+  const marcarTodasComoLidas = () => setNotificacoesLidasIds(comunicados.map(c => c.id));
 
-  const marcarTodasComoLidas = () => {
-    setNotificacoesLidasIds(comunicados.map(c => c.id));
-  };
-
+  // === SINCRONIZAÇÃO COM O FIRESTORE ===
   const buscarDadosDoFirebase = useCallback(async (manual = false) => {
+    if (!auth.currentUser) return;
     if (manual) setSincronizando(true);
     setCarregando(true);
     try {
-      const qTurmas = perfil === 'professor'
-        ? query(collection(db, 'grade_aulas'))
-        : query(collection(db, 'turmas'));
+      const qTurmas = perfil === 'professor' ? query(collection(db, 'grade_aulas')) : query(collection(db, 'turmas'));
       const [turmasSnap, chamadasSnap] = await Promise.all([
         getDocs(qTurmas),
         getDocs(query(collection(db, 'chamadas'), where('dataChamadaFormatada', '==', getDataDeHoje()))),
@@ -153,7 +153,6 @@ export default function DashboardScreen() {
         const listaCom = comSnap.docs
           .map(d => {
             const data = d.data() as any;
-            const ms = data.criadoEm?.toMillis ? data.criadoEm.toMillis() : 0;
             return {
               id: d.id,
               titulo: String(data.titulo || 'Comunicado'),
@@ -163,7 +162,7 @@ export default function DashboardScreen() {
               destinatarioId: String(data.destinatarioId || ''),
               privado: Boolean(data.privado),
               tipo: String(data.tipo || 'geral'),
-              criadoEmMs: ms,
+              criadoEmMs: data.criadoEm?.toMillis ? data.criadoEm.toMillis() : 0,
             };
           })
           .filter(c => {
@@ -185,13 +184,10 @@ export default function DashboardScreen() {
       if (perfil === 'admin') {
         try {
           const usersSnap = await getDocs(collection(db, 'usuarios'));
-          const equipeAtiva = usersSnap.docs
-            .map(d => d.data() as any)
-            .filter(u => {
-              const cargo = String(u.role ?? u.perfil ?? '').toLowerCase();
-              const ativo = u.ativo !== false && u.situacao !== 'Inativo';
-              return (cargo.includes('prof') || cargo.includes('coord')) && ativo;
-            });
+          const equipeAtiva = usersSnap.docs.map(d => d.data() as any).filter(u => {
+            const cargo = String(u.role ?? u.perfil ?? '').toLowerCase();
+            return (cargo.includes('prof') || cargo.includes('coord')) && u.ativo !== false && u.situacao !== 'Inativo';
+          });
           setTotalEquipeAtiva(equipeAtiva.length);
         } catch { setTotalEquipeAtiva(0); }
         try {
@@ -203,13 +199,10 @@ export default function DashboardScreen() {
       if (perfil === 'coordenador') {
         try {
           const usersSnap = await getDocs(collection(db, 'usuarios'));
-          const profsAtivos = usersSnap.docs
-            .map(d => ({ id: d.id, ...(d.data() as any) }))
-            .filter(u => {
-              const cargo = String(u.role ?? u.perfil ?? '').toLowerCase();
-              const ativo = u.ativo !== false && u.situacao !== 'Inativo';
-              return cargo.includes('prof') && ativo;
-            });
+          const profsAtivos = usersSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter(u => {
+            const cargo = String(u.role ?? u.perfil ?? '').toLowerCase();
+            return cargo.includes('prof') && u.ativo !== false && u.situacao !== 'Inativo';
+          });
           setProfessoresAtivosLista(profsAtivos);
           setTotalProfessoresAtivos(profsAtivos.length);
         } catch {
@@ -221,8 +214,7 @@ export default function DashboardScreen() {
           const somaTurmas = listaTurmas.reduce((acc, t: any) => acc + (Number(t.alunos) || 0), 0);
           setTotalAlunosBase(Math.max(alunosSnap.size, somaTurmas));
         } catch {
-          const somaTurmas = listaTurmas.reduce((acc, t: any) => acc + (Number(t.alunos) || 0), 0);
-          setTotalAlunosBase(somaTurmas);
+          setTotalAlunosBase(listaTurmas.reduce((acc, t: any) => acc + (Number(t.alunos) || 0), 0));
         }
         try {
           const gradeSnap = await getDocs(query(collection(db, 'grade_aulas'), where('diaId', '==', diaBusca)));
@@ -246,12 +238,9 @@ export default function DashboardScreen() {
     setFraseMotivacional(FRASES[Math.floor(Math.random() * FRASES.length)]);
   }, [perfil]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void buscarDadosDoFirebase();
-    }, [buscarDadosDoFirebase])
-  );
+  useFocusEffect(useCallback(() => { void buscarDadosDoFirebase(); }, [buscarDadosDoFirebase]));
 
+  // === DADOS DERIVADOS E ALOCAÇÃO ===
   const seriesDisponiveis = useMemo(() => {
     const setSeries = new Set<string>();
     todasTurmas.forEach(t => { if (t.nome) setSeries.add(extrairSerie(t.nome)); });
@@ -260,11 +249,7 @@ export default function DashboardScreen() {
 
   const turnosDisponiveisDaSerie = useMemo(() => {
     if (!formAluno.serieSelecionada) return new Set<string>();
-    return new Set(
-      todasTurmas
-        .filter(t => extrairSerie(t.nome) === formAluno.serieSelecionada)
-        .map(t => String(t.turno || 'Matutino'))
-    );
+    return new Set(todasTurmas.filter(t => extrairSerie(t.nome) === formAluno.serieSelecionada).map(t => String(t.turno || 'Matutino')));
   }, [todasTurmas, formAluno.serieSelecionada]);
 
   const salasFiltradas = useMemo(() => {
@@ -274,45 +259,19 @@ export default function DashboardScreen() {
       .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'));
   }, [todasTurmas, formAluno.serieSelecionada, formAluno.turnoSelecionado]);
 
-  const aulasPendentesHojeCoord = useMemo(
-    () => gradeHojeCoord.filter(g => !chamadasRealizadasHoje.includes(g.id)),
-    [gradeHojeCoord, chamadasRealizadasHoje]
-  );
-  const turmasSemAlunosCoord = useMemo(
-    () => todasTurmas.filter(t => (Number(t.alunos) || 0) === 0),
-    [todasTurmas]
-  );
+  const aulasPendentesHojeCoord = useMemo(() => gradeHojeCoord.filter(g => !chamadasRealizadasHoje.includes(g.id)), [gradeHojeCoord, chamadasRealizadasHoje]);
+  const turmasSemAlunosCoord = useMemo(() => todasTurmas.filter(t => (Number(t.alunos) || 0) === 0), [todasTurmas]);
 
-  const abrirModalNovoAlunoCoord = () => {
-    setFormAluno(FORM_ALUNO_INICIAL);
-    setDropdownSerieAberto(false);
-    setDropdownSalaAberto(false);
-    setModalAlunoCoord(true);
-  };
-  const abrirModalGradeCoord = () => {
-    setFormGrade(FORM_GRADE_INICIAL);
-    setDropdownProfAberto(false);
-    setDropdownTurmaGradeAberto(false);
-    setModalGradeCoord(true);
-  };
-  const abrirModalComunicadoCoord = () => {
-    setFormComunicado(FORM_COMUNICADO_INICIAL);
-    setDropdownDestinatarioAberto(false);
-    setModalComunicadoCoord(true);
-  };
+  const abrirModalNovoAlunoCoord = () => { setFormAluno(FORM_ALUNO_INICIAL); setDropdownSerieAberto(false); setDropdownSalaAberto(false); setModalAlunoCoord(true); };
+  const abrirModalGradeCoord = () => { setFormGrade(FORM_GRADE_INICIAL); setDropdownProfAberto(false); setDropdownTurmaGradeAberto(false); setModalGradeCoord(true); };
+  const abrirModalComunicadoCoord = () => { setFormComunicado(FORM_COMUNICADO_INICIAL); setDropdownDestinatarioAberto(false); setModalComunicadoCoord(true); };
 
   const selecionarSerie = (serie: string) => {
     const turnos = Array.from(new Set(todasTurmas.filter(t => extrairSerie(t.nome) === serie).map(t => String(t.turno || 'Matutino'))));
     const turnoAuto = turnos.length === 1 ? turnos[0] : '';
     const salasAuto = turnoAuto ? todasTurmas.filter(t => extrairSerie(t.nome) === serie && String(t.turno || 'Matutino') === turnoAuto) : [];
     const salaUnica = salasAuto.length === 1 ? salasAuto[0] : null;
-    setFormAluno(prev => ({
-      ...prev,
-      serieSelecionada: serie,
-      turnoSelecionado: turnoAuto,
-      turmaId: salaUnica ? salaUnica.id : '',
-      turmaNome: salaUnica ? salaUnica.nome : '',
-    }));
+    setFormAluno(prev => ({ ...prev, serieSelecionada: serie, turnoSelecionado: turnoAuto, turmaId: salaUnica ? salaUnica.id : '', turmaNome: salaUnica ? salaUnica.nome : '' }));
     setDropdownSerieAberto(false);
     setDropdownSalaAberto(false);
   };
@@ -320,15 +279,11 @@ export default function DashboardScreen() {
   const selecionarTurnoAluno = (turno: string) => {
     const salas = todasTurmas.filter(t => extrairSerie(t.nome) === formAluno.serieSelecionada && String(t.turno || 'Matutino') === turno);
     const salaUnica = salas.length === 1 ? salas[0] : null;
-    setFormAluno(prev => ({
-      ...prev,
-      turnoSelecionado: turno,
-      turmaId: salaUnica ? salaUnica.id : '',
-      turmaNome: salaUnica ? salaUnica.nome : '',
-    }));
+    setFormAluno(prev => ({ ...prev, turnoSelecionado: turno, turmaId: salaUnica ? salaUnica.id : '', turmaNome: salaUnica ? salaUnica.nome : '' }));
     setDropdownSalaAberto(false);
   };
 
+  // === AÇÕES DE CADASTRO E EXPORTAÇÃO ===
   const salvarAlunoCoordenacao = async () => {
     if (!formAluno.nome.trim()) return notificar('aviso', 'Campo obrigatório', 'Informe o nome completo do aluno.');
     if (formAluno.dataNascimento.replace(/\D/g, '').length < 8) return notificar('aviso', 'Data de nascimento', 'Informe a data de nascimento completa (DD/MM/AAAA).');
@@ -420,23 +375,43 @@ export default function DashboardScreen() {
 
   const salvarNovoUsuario = async () => {
     const { nome, email, cpf, role, disciplina } = formUser;
-    if (!nome.trim() || !email.trim() || cpf.replace(/\D/g, '').length < 11) return notificar('aviso', 'Campos obrigatórios', 'Preencha nome completo, e-mail válido e CPF (11 dígitos).');
-    if (role === 'professor' && !disciplina.trim()) return notificar('aviso', 'Campos obrigatórios', 'Informe a disciplina ministrada pelo professor.');
+    if (!nome.trim() || !email.trim() || cpf.replace(/\D/g, '').length < 11) {
+      return notificar('aviso', 'Campos obrigatórios', 'Preencha nome completo, e-mail válido e CPF (11 dígitos).');
+    }
+    if (role === 'professor' && !disciplina.trim()) {
+      return notificar('aviso', 'Campos obrigatórios', 'Informe a disciplina ministrada pelo professor.');
+    }
+    const emailLimpo = email.trim().toLowerCase();
     const senhaGerada = gerarSenhaInicial(nome, cpf);
     setSalvando(true);
     try {
-      await addDoc(collection(db, 'usuarios'), {
-        nome: nome.trim(), email: email.trim().toLowerCase(), cpf: cpf.replace(/\D/g, ''), role,
+      const uid = await criarContaAuthSemDeslogar(emailLimpo, senhaGerada);
+      await setDoc(doc(db, 'usuarios', uid), {
+        nome: nome.trim(),
+        email: emailLimpo,
+        cpf: cpf.replace(/\D/g, ''),
+        role,
         ...(role === 'professor' ? { disciplina: disciplina.trim() } : {}),
-        ativo: true, senhaInicialGerada: senhaGerada, criadoPor: perfilDemo.nome, criadoEm: serverTimestamp(),
+        ativo: true,
+        senhaInicialGerada: senhaGerada,
+        criadoPor: perfilDemo.nome,
+        criadoEm: serverTimestamp(),
       });
       setModalUsuario(false);
       setFormUser({ nome: '', email: '', cpf: '', role: 'professor', disciplina: '' });
       void buscarDadosDoFirebase();
       notificar('sucesso', 'Usuário cadastrado!', `${nome.trim()} (${role.toUpperCase()}) • Senha inicial: ${senhaGerada}`);
     } catch (error: any) {
-      notificar('erro', 'Erro ao salvar usuário', error?.message || 'Não foi possível gravar o usuário no Firestore.');
-    } finally { setSalvando(false); }
+      const msg =
+        error?.code === 'auth/email-already-in-use'
+          ? 'Este e-mail já está cadastrado na autenticação.'
+          : error?.code === 'auth/weak-password'
+            ? 'A senha gerada precisa ter pelo menos 6 caracteres.'
+            : error?.message || 'Não foi possível criar o usuário.';
+      notificar('erro', 'Erro ao salvar usuário', msg);
+    } finally {
+      setSalvando(false);
+    }
   };
 
   const salvarNovaTurma = async () => {
@@ -471,6 +446,7 @@ export default function DashboardScreen() {
     }
   };
 
+  // === DADOS DOS PAINÉIS ===
   const turmasVisiveis = perfil === 'professor'
     ? todasTurmas.filter(t => t.professorId === ID_PROFESSOR_DEMONSTRATIVO || String(t.professorNome || '').toLowerCase().includes('luffy'))
     : todasTurmas;
@@ -486,7 +462,7 @@ export default function DashboardScreen() {
   const kpisCoordenador = [
     { id: 'alunos', titulo: 'Alunos', valor: String(totalAlunosBase), status: 'Matriculados', corPill: tema.botaoPrimario, icone: 'school-outline' as const },
     { id: 'turmas', titulo: 'Turmas', valor: String(todasTurmas.length), status: 'Ativas', corPill: '#2E7D32', icone: 'layers-outline' as const },
-    { id: 'professores', titulo: 'Professores', valor: String(totalProfessoresAtivos), status: 'Docentes', corPill: '#1565C0', icone: 'people-outline' as const },
+    { id: 'professores', titulo: 'Professores', valor: String(totalProfessoresAtivos), status: 'Docentes', corPill: '#6366F1', icone: 'people-outline' as const },
   ];
   const atalhosAdmin = [
     { key: 'auditoria', icone: 'shield-checkmark-outline' as const, titulo: 'Histórico de Auditoria', sub: 'Logs administrativos e ações do sistema', onPress: () => router.push('/historico?aba=auditoria') },
@@ -499,21 +475,18 @@ export default function DashboardScreen() {
     { key: 'comunicado', icone: 'megaphone-outline' as const, titulo: 'Publicar Comunicado Oficial', sub: 'Disparar aviso para docentes ou série específica', onPress: abrirModalComunicadoCoord },
     { key: 'alertas', icone: 'warning-outline' as const, titulo: 'Alertas Pedagógicos', sub: totalAlertasCoord > 0 ? `${totalAlertasCoord} ponto(s) de atenção encontrados hoje` : 'Nenhum alerta pendente no momento', onPress: () => setModalAlertasCoord(true) },
   ];
-  const toastProps = {
-    feedback,
-    onFechar: fecharFeedback,
-    fundoCard: tema.fundoTopo,
-    textoPrincipal: tema.textoPrincipal,
-    textoSecundario: tema.textoSecundario,
-  };
+  const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
   const [fraseCitacao, fraseAutor] = fraseMotivacional.split(' - ');
 
+  // === INTERFACE ===
   return (
     <View style={[styles.container, { backgroundColor: tema.fundoBase }]}>
+      <Image source={ICONE_VIOLETA} style={styles.bgWatermark} resizeMode="cover" pointerEvents="none" />
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={carregando} onRefresh={() => void buscarDadosDoFirebase(true)} tintColor={tema.botaoPrimario} />}>
+        {/* Cabeçalho e Saudação */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.tituloSaudacao, { color: tema.textoPrincipal }]}>{saudacaoTempo}, {perfilDemo.cargo} {perfilDemo.nome.split(' ')[0]}!</Text>
+            <Text style={[styles.tituloSaudacao, { color: tema.textoPrincipal }]}>{saudacaoTempo}, {perfilDemo.nome.split(' ')[0]}!</Text>
             <View style={[styles.badgeDemonstracao, { backgroundColor: tema.inputBackground, borderColor: tema.borda, borderWidth: 1 }]}>
               <Text style={[styles.textoBadgeDemonstracao, { color: tema.textoSecundario }]}>Modo demonstração</Text>
             </View>
@@ -529,12 +502,14 @@ export default function DashboardScreen() {
           </View>
         </View>
 
+        {/* Banner Motivacional (Identidade VIOLETA) */}
         <View style={[styles.banner, { backgroundColor: tema.fundoTopo }]}>
           <Text style={[styles.textoBanner, { color: tema.textoLogo }]}>"{fraseCitacao}"</Text>
           <Text style={[styles.assinaturaBanner, { color: tema.textoLogo, opacity: 0.85 }]}>{fraseAutor}</Text>
           <Ionicons name="school" size={60} color={tema.textoLogo} style={styles.watermark} />
         </View>
 
+        {/* Visão Administrador */}
         {perfil === 'admin' && (
           <View>
             <View style={styles.sectionHeader}><Text style={[styles.sectionTitle, { color: tema.textoPrincipal }]}>Resumo administrativo</Text></View>
@@ -580,6 +555,7 @@ export default function DashboardScreen() {
           </View>
         )}
 
+        {/* Visão Coordenador */}
         {perfil === 'coordenador' && (
           <View>
             <View style={styles.sectionHeader}><Text style={[styles.sectionTitle, { color: tema.textoPrincipal }]}>Painel da coordenação</Text></View>
@@ -625,6 +601,7 @@ export default function DashboardScreen() {
           </View>
         )}
 
+        {/* Visão Professor */}
         {perfil === 'professor' && (
           <>
             <View style={styles.sectionHeader}><Text style={[styles.sectionTitle, { color: tema.textoPrincipal }]}>Meu Cronograma</Text></View>
@@ -696,6 +673,7 @@ export default function DashboardScreen() {
         )}
       </ScrollView>
 
+      {/* Modal: Cadastrar Aluno (Coordenador) */}
       <Modal visible={modalAlunoCoord} transparent animationType="slide" onRequestClose={() => setModalAlunoCoord(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -803,6 +781,7 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Montar Grade de Aulas (Coordenador) */}
       <Modal visible={modalGradeCoord} transparent animationType="slide" onRequestClose={() => setModalGradeCoord(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -866,25 +845,9 @@ export default function DashboardScreen() {
                 )}
               </View>
               <View style={styles.rowHorario}>
-                <TextInput
-                  value={formGrade.horaInicio}
-                  onChangeText={v => setFormGrade(prev => ({ ...prev, horaInicio: formatarHoraInput(v) }))}
-                  keyboardType="numeric"
-                  maxLength={5}
-                  placeholder="07:00"
-                  placeholderTextColor={tema.textoSecundario}
-                  style={[styles.inputHora, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]}
-                />
+                <TextInput value={formGrade.horaInicio} onChangeText={v => setFormGrade(prev => ({ ...prev, horaInicio: formatarHoraInput(v) }))} keyboardType="numeric" maxLength={5} placeholder="07:00" placeholderTextColor={tema.textoSecundario} style={[styles.inputHora, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]} />
                 <Text style={[styles.textoAte, { color: tema.textoSecundario }]}>até</Text>
-                <TextInput
-                  value={formGrade.horaFim}
-                  onChangeText={v => setFormGrade(prev => ({ ...prev, horaFim: formatarHoraInput(v) }))}
-                  keyboardType="numeric"
-                  maxLength={5}
-                  placeholder="07:50"
-                  placeholderTextColor={tema.textoSecundario}
-                  style={[styles.inputHora, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]}
-                />
+                <TextInput value={formGrade.horaFim} onChangeText={v => setFormGrade(prev => ({ ...prev, horaFim: formatarHoraInput(v) }))} keyboardType="numeric" maxLength={5} placeholder="07:50" placeholderTextColor={tema.textoSecundario} style={[styles.inputHora, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]} />
               </View>
               <TouchableOpacity style={[styles.btnSalvarModal, { backgroundColor: tema.botaoPrimario }]} onPress={() => void salvarGradeCoordenacao()} disabled={salvando}>
                 <Text style={[styles.textoBtnAcao, { color: tema.textoBotao }]}>{salvando ? 'Salvando...' : 'Alocar na Grade'}</Text>
@@ -895,6 +858,7 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Publicar Comunicado Oficial (Coordenador) */}
       <Modal visible={modalComunicadoCoord} transparent animationType="slide" onRequestClose={() => setModalComunicadoCoord(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -904,11 +868,7 @@ export default function DashboardScreen() {
             </View>
             <ScrollView contentContainerStyle={{ padding: 20 }} keyboardShouldPersistTaps="handled">
               <Text style={[styles.labelInput, { color: tema.textoPrincipal }]}>Destinatário</Text>
-              <TouchableOpacity
-                style={[styles.dropdownTrigger, { backgroundColor: tema.inputBackground, borderColor: dropdownDestinatarioAberto ? tema.botaoPrimario : tema.borda }]}
-                onPress={() => setDropdownDestinatarioAberto(!dropdownDestinatarioAberto)}
-                activeOpacity={0.75}
-              >
+              <TouchableOpacity style={[styles.dropdownTrigger, { backgroundColor: tema.inputBackground, borderColor: dropdownDestinatarioAberto ? tema.botaoPrimario : tema.borda }]} onPress={() => setDropdownDestinatarioAberto(!dropdownDestinatarioAberto)} activeOpacity={0.75}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Ionicons name="people-outline" size={18} color={tema.botaoPrimario} />
                   <Text style={{ color: tema.textoPrincipal, fontSize: 14, fontWeight: '600' }}>{formComunicado.destinatario}</Text>
@@ -920,14 +880,7 @@ export default function DashboardScreen() {
                   {['Todos os Professores', ...seriesDisponiveis].map(dest => {
                     const sel = formComunicado.destinatario === dest;
                     return (
-                      <TouchableOpacity
-                        key={dest}
-                        style={[styles.dropdownItem, { borderBottomColor: tema.borda, backgroundColor: sel ? tema.botaoPrimario + '18' : 'transparent' }]}
-                        onPress={() => {
-                          setFormComunicado(prev => ({ ...prev, destinatario: dest }));
-                          setDropdownDestinatarioAberto(false);
-                        }}
-                      >
+                      <TouchableOpacity key={dest} style={[styles.dropdownItem, { borderBottomColor: tema.borda, backgroundColor: sel ? tema.botaoPrimario + '18' : 'transparent' }]} onPress={() => { setFormComunicado(prev => ({ ...prev, destinatario: dest })); setDropdownDestinatarioAberto(false); }}>
                         <Text style={{ color: sel ? tema.botaoPrimario : tema.textoPrincipal, fontWeight: sel ? '700' : '500', fontSize: 14 }}>{dest}</Text>
                         {sel && <Ionicons name="checkmark" size={18} color={tema.botaoPrimario} />}
                       </TouchableOpacity>
@@ -948,6 +901,7 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Alertas Pedagógicos (Coordenador) */}
       <Modal visible={modalAlertasCoord} transparent animationType="slide" onRequestClose={() => setModalAlertasCoord(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -999,6 +953,7 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Cadastrar Novo Usuário (Admin) */}
       <Modal visible={modalUsuario} transparent animationType="slide" onRequestClose={() => setModalUsuario(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -1045,6 +1000,7 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Cadastrar Nova Turma (Admin) */}
       <Modal visible={modalTurma} transparent animationType="slide" onRequestClose={() => setModalTurma(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalFormContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -1075,15 +1031,14 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Comunicados e Avisos */}
       <Modal visible={modalNotificacoes} transparent animationType="fade" onRequestClose={() => setModalNotificacoes(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setModalNotificacoes(false)}>
           <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: tema.fundoBase }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <Text style={[styles.modalTitle, { color: tema.textoPrincipal }]}>Comunicados e Avisos</Text>
               {totalNaoLidas > 0 && (
-                <TouchableOpacity onPress={marcarTodasComoLidas}>
-                  <Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: '700' }}>Marcar lidas</Text>
-                </TouchableOpacity>
+                <TouchableOpacity onPress={marcarTodasComoLidas}><Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: '700' }}>Marcar lidas</Text></TouchableOpacity>
               )}
             </View>
             <FlatList
@@ -1106,18 +1061,11 @@ export default function DashboardScreen() {
                     onPress={() => { if (!lida) setNotificacoesLidasIds(prev => [...prev, item.id]); }}
                     style={[styles.cardNotificacao, { backgroundColor: lida ? tema.inputBackground : tema.botaoPrimario + '15', borderColor: lida ? tema.borda : tema.botaoPrimario }]}
                   >
-                    <Ionicons
-                      name={isCalendario ? 'calendar' : 'megaphone'}
-                      size={22}
-                      color={isCalendario ? '#EF6C00' : tema.botaoPrimario}
-                      style={{ marginRight: 14, marginTop: 2 }}
-                    />
+                    <Ionicons name={isCalendario ? 'calendar' : 'megaphone'} size={22} color={isCalendario ? '#EF6C00' : tema.botaoPrimario} style={{ marginRight: 14, marginTop: 2 }} />
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.tituloNotificacao, { color: tema.textoPrincipal }]}>{item.titulo}</Text>
                       <Text style={[styles.mensagemNotificacao, { color: tema.textoSecundario }]}>{item.mensagem}</Text>
-                      <Text style={{ color: tema.textoSecundario, fontSize: 11, marginTop: 6, opacity: 0.8 }}>
-                        {item.autor} • Para: {item.destinatario}
-                      </Text>
+                      <Text style={{ color: tema.textoSecundario, fontSize: 11, marginTop: 6, opacity: 0.8 }}>{item.autor} • Para: {item.destinatario}</Text>
                     </View>
                   </TouchableOpacity>
                 );
@@ -1132,8 +1080,11 @@ export default function DashboardScreen() {
   );
 }
 
+// === ESTILOS ===
 const styles = StyleSheet.create({
-  container: { flex: 1 }, scrollContent: { padding: 20, paddingTop: 50, paddingBottom: 30 },
+  container: { flex: 1 },
+  bgWatermark: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: 0.15 },
+  scrollContent: { padding: 20, paddingTop: 50, paddingBottom: 30 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 25 },
   headerActions: { flexDirection: 'row', alignItems: 'center' },
   iconButton: { marginRight: 15, position: 'relative', padding: 5 },
@@ -1143,34 +1094,46 @@ const styles = StyleSheet.create({
   badgeDemonstracao: { alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, marginTop: 6 },
   textoBadgeDemonstracao: { fontSize: 11, fontWeight: '600' },
   avatar: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
-  banner: { width: '100%', padding: 20, borderRadius: 15, marginBottom: 25, position: 'relative', overflow: 'hidden', elevation: 3 },
+  banner: { width: '100%', padding: 20, borderRadius: 15, marginBottom: 25, position: 'relative', overflow: 'hidden', elevation: 3, borderWidth: 1, borderColor: 'rgba(124, 124, 255, 0.28)' },
   textoBanner: { fontSize: 15, fontWeight: 'bold', fontStyle: 'italic', marginBottom: 10, zIndex: 2, lineHeight: 22 },
   assinaturaBanner: { fontSize: 12, fontWeight: '600', zIndex: 2, alignSelf: 'flex-end' },
   watermark: { position: 'absolute', left: -10, bottom: -15, opacity: 0.2, transform: [{ rotate: '15deg' }] },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold' }, btnVerTodas: { fontSize: 14, fontWeight: '600' },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold' },
+  btnVerTodas: { fontSize: 14, fontWeight: '600' },
   gradeIndicadores: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   cardIndicador: { flexGrow: 1, flexBasis: '30%', minWidth: 95, borderWidth: 1, borderRadius: 12, padding: 14, alignItems: 'center' },
-  valorIndicador: { fontSize: 22, fontWeight: 'bold', marginTop: 8 }, tituloIndicador: { fontSize: 11, textAlign: 'center', marginTop: 2 },
-  pillStatus: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 8 }, textoPillStatus: { fontSize: 10, fontWeight: 'bold' },
+  valorIndicador: { fontSize: 22, fontWeight: 'bold', marginTop: 8 },
+  tituloIndicador: { fontSize: 11, textAlign: 'center', marginTop: 2 },
+  pillStatus: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 8 },
+  textoPillStatus: { fontSize: 10, fontWeight: 'bold' },
   barraStatus: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, marginTop: 12, gap: 8 },
-  pontoOnline: { width: 8, height: 8, borderRadius: 4 }, textoStatusSistema: { flex: 1, fontSize: 12, fontWeight: '500' },
+  pontoOnline: { width: 8, height: 8, borderRadius: 4 },
+  textoStatusSistema: { flex: 1, fontSize: 12, fontWeight: '500' },
   rowAcoes: { flexDirection: 'row', gap: 10 },
   btnAcaoRapida: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 46, borderRadius: 12, gap: 8 },
   textoBtnAcao: { fontSize: 14, fontWeight: 'bold' },
   atalho: { flexDirection: 'row', alignItems: 'center', padding: 15, borderRadius: 12, borderWidth: 1, marginBottom: 10, gap: 14 },
-  textoAtalho: { fontSize: 14, fontWeight: '600' }, subAtalho: { fontSize: 11, marginTop: 2 },
+  textoAtalho: { fontSize: 14, fontWeight: '600' },
+  subAtalho: { fontSize: 11, marginTop: 2 },
   scrollMatrizContainer: { flexGrow: 0, gap: 10, paddingBottom: 10 },
   colunaDia: { flexShrink: 0, borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
-  cabecalhoDia: { paddingVertical: 12, alignItems: 'center' }, textoDiaNome: { fontSize: 14, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
-  corpoColuna: { padding: 8, minHeight: 180 }, blocoAula: { padding: 12, borderRadius: 12, marginBottom: 10, elevation: 2 },
-  blocoMateria: { fontSize: 13, fontWeight: 'bold', marginBottom: 4 }, blocoTurma: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
-  blocoRodape: { flexDirection: 'column', alignItems: 'flex-start', gap: 3 }, blocoHorario: { fontSize: 11, fontWeight: 'bold', opacity: 0.8 },
+  cabecalhoDia: { paddingVertical: 12, alignItems: 'center' },
+  textoDiaNome: { fontSize: 14, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
+  corpoColuna: { padding: 8, minHeight: 180 },
+  blocoAula: { padding: 12, borderRadius: 12, marginBottom: 10, elevation: 2 },
+  blocoMateria: { fontSize: 13, fontWeight: 'bold', marginBottom: 4 },
+  blocoTurma: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
+  blocoRodape: { flexDirection: 'column', alignItems: 'flex-start', gap: 3 },
+  blocoHorario: { fontSize: 11, fontWeight: 'bold', opacity: 0.8 },
   blocoProf: { fontSize: 10, fontWeight: 'bold', opacity: 0.7 },
   cardTurma: { flexDirection: 'row', alignItems: 'center', padding: 15, borderRadius: 12, borderWidth: 1, marginBottom: 12 },
   iconeTurmaBg: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
-  infoTurma: { flex: 1 }, nomeTurma: { fontSize: 16, fontWeight: 'bold' }, materiaTurma: { fontSize: 14, marginBottom: 5 },
-  detalhesTurmaMinimalista: { flexDirection: 'row', alignItems: 'center', marginTop: 4 }, textoHorarioDestaque: { fontSize: 13, fontWeight: 'bold', marginLeft: 6 },
+  infoTurma: { flex: 1 },
+  nomeTurma: { fontSize: 16, fontWeight: 'bold' },
+  materiaTurma: { fontSize: 14, marginBottom: 5 },
+  detalhesTurmaMinimalista: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  textoHorarioDestaque: { fontSize: 13, fontWeight: 'bold', marginLeft: 6 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   modalContent: { height: '70%', borderTopLeftRadius: 25, borderTopRightRadius: 25, elevation: 10 },
   modalFormContent: { maxHeight: '90%', borderTopLeftRadius: 25, borderTopRightRadius: 25, borderWidth: 1 },
@@ -1193,5 +1156,6 @@ const styles = StyleSheet.create({
   boxSenhaGerada: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 16 },
   btnSalvarModal: { height: 48, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginTop: 6, marginBottom: 10 },
   cardNotificacao: { flexDirection: 'row', padding: 15, borderRadius: 12, borderWidth: 1, marginBottom: 12 },
-  tituloNotificacao: { fontSize: 15, fontWeight: 'bold', marginBottom: 4 }, mensagemNotificacao: { fontSize: 13, lineHeight: 18 },
+  tituloNotificacao: { fontSize: 15, fontWeight: 'bold', marginBottom: 4 },
+  mensagemNotificacao: { fontSize: 13, lineHeight: 18 },
 });

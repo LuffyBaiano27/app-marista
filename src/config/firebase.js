@@ -1,8 +1,8 @@
-import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { initializeApp, deleteApp } from "firebase/app";
+import { getAuth, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyB6inrc7g5BWtURTfiJay2YG3i5dtjWNrs",
   authDomain: "marista-app.firebaseapp.com",
   projectId: "marista-app",
@@ -20,5 +20,18 @@ export const auth = getAuth(app);
 
 // Inicializa o Banco de Dados (Para turmas, notas, alunos)
 export const db = getFirestore(app);
+
+// Cria conta no Firebase Auth sem deslogar o Admin atual
+export const criarContaAuthSemDeslogar = async (email, senha) => {
+  const appSecundario = initializeApp(firebaseConfig, `Secondary_${Date.now()}`);
+  const authSecundario = getAuth(appSecundario);
+  try {
+    const credencial = await createUserWithEmailAndPassword(authSecundario, email.trim().toLowerCase(), senha);
+    await signOut(authSecundario);
+    return credencial.user.uid;
+  } finally {
+    await deleteApp(appSecundario);
+  }
+};
 
 export default app;

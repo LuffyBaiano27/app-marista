@@ -1,18 +1,21 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Modal, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { signOut } from 'firebase/auth';
 import { collection, getDoc, getDocs, addDoc, setDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { useDemoProfile, type ModoTema } from '../../contexts/demoProfileContext';
-import { db } from '../../config/firebase';
+import { auth, db } from '../../config/firebase';
 import { FeedbackToast, type EstadoFeedback, type TipoFeedback } from '../../components/FeedbackToast';
 
+// === TIPOS E CONSTANTES ===
 type EtapaStatus = 'pendente' | 'rodando' | 'ok' | 'erro';
 type TamanhoFonte = 'Pequena' | 'Média' | 'Grande';
 interface EtapaIntegridade { id: string; titulo: string; detalhe: string; status: EtapaStatus; erro?: string; }
 interface EventoCalendario { id: string; titulo: string; tipo: 'Férias' | 'Pausa / Recesso' | 'Feriado'; periodo: string; setor: 'Coordenação' | 'Infra'; pendenteAviso?: boolean; }
 interface SessaoAtiva { id: string; dispositivo: string; local: string; horario: string; atual?: boolean; }
 
+const ICONE_VIOLETA = require('../../../assets/images/icon.png');
 const NOMES_PERFIS = { admin: 'Administrador', coordenador: 'Coordenador', professor: 'Professor' };
 const IDENTIDADES_DEMO = {
   admin: { nome: 'Marina Andrade', email: 'marina@violeta.com', iniciais: 'MA' },
@@ -40,10 +43,11 @@ const esperar = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 export default function PerfilScreen() {
   const router = useRouter();
-  const { perfil, setPerfil, modoTema, setModoTema, temaAtivo: tema } = useDemoProfile();
+  const { perfil, setPerfil, perfilReal, setPerfilReal, usuarioLogado, setUsuarioLogado, modoTema, setModoTema, temaAtivo: tema } = useDemoProfile();
+  const identidade = perfil === perfilReal && usuarioLogado ? usuarioLogado : IDENTIDADES_DEMO[perfil];
+  const usuario = { ...identidade, cargo: NOMES_PERFIS[perfil] };
 
-  const usuario = { ...IDENTIDADES_DEMO[perfil], cargo: NOMES_PERFIS[perfil] };
-
+  // === ESTADOS (MODAIS, CONTA, INSTITUIÇÃO E FERRAMENTAS) ===
   const [modalDados, setModalDados] = useState(false);
   const [modalPrivacidade, setModalPrivacidade] = useState(false);
   const [modalSessoes, setModalSessoes] = useState(false);
@@ -52,7 +56,9 @@ export default function PerfilScreen() {
   const [modalAviso, setModalAviso] = useState(false);
   const [modalInstituicao, setModalInstituicao] = useState(false);
   const [modalIntegridade, setModalIntegridade] = useState(false);
+  const [modalLogout, setModalLogout] = useState(false);
   const [confirmarLimpezaTeste, setConfirmarLimpezaTeste] = useState(false);
+  const [saindo, setSaindo] = useState(false);
 
   const [formDados, setFormDados] = useState({ nome: usuario.nome, dataNascimento: '27/09/2003', endereco: 'Salvador, BA' });
   const [senhaAtual, setSenhaAtual] = useState('');
@@ -78,7 +84,6 @@ export default function PerfilScreen() {
   const [verificandoIntegridade, setVerificandoIntegridade] = useState(false);
   const [etapasIntegridade, setEtapasIntegridade] = useState<EtapaIntegridade[]>(ETAPAS_INICIAIS);
   const [resumoIntegridade, setResumoIntegridade] = useState<string | null>(null);
-
   const [backupEmAndamento, setBackupEmAndamento] = useState(false);
   const [progressoBackup, setProgressoBackup] = useState(0);
   const [etapaBackupTexto, setEtapaBackupTexto] = useState('');
@@ -88,13 +93,13 @@ export default function PerfilScreen() {
 
   const escalaFonte = FATOR_FONTE[tamanhoFonte];
   const tamFonte = useCallback((base: number) => Math.round(base * escalaFonte), [escalaFonte]);
-
   const notificar = useCallback((tipo: TipoFeedback, titulo: string, mensagem: string) => {
     setFeedback({ visivel: true, tipo, titulo, mensagem });
   }, []);
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
   const voltar = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
 
+  // === SINCRONIZAÇÃO DE CONFIGURAÇÕES ===
   const carregarConfigInstituicao = useCallback(async () => {
     try {
       const snap = await getDoc(doc(db, 'instituicao', 'config'));
@@ -106,24 +111,26 @@ export default function PerfilScreen() {
         if (Array.isArray(d.calendarioEventos)) setEventos(d.calendarioEventos);
       }
     } catch {
-      // mantém valores padrão caso ainda não exista o documento ou regra
+      // mantém valores padrão caso ainda não exista o documento
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void carregarConfigInstituicao();
-    }, [carregarConfigInstituicao])
-  );
+  useFocusEffect(useCallback(() => { void carregarConfigInstituicao(); }, [carregarConfigInstituicao]));
 
-  const handleLogout = () => {
-    if (Platform.OS === 'web') {
-      if (window.confirm('Deseja sair do sistema Violeta?')) router.replace('/');
-    } else {
-      Alert.alert('Encerrar Sessão', 'Deseja sair do sistema Violeta?', [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Sair', style: 'destructive', onPress: () => router.replace('/') },
-      ]);
+  // === AÇÕES DE CONTA, SESSÕES E COMUNICADOS ===
+  const confirmarLogout = async () => {
+    setSaindo(true);
+    try {
+      await signOut(auth);
+    } catch {
+      // segue para a tela de login mesmo se já estiver desconectado
+    } finally {
+      setModalLogout(false);
+      setUsuarioLogado(null);
+      setPerfil('admin');
+      setPerfilReal('admin');
+      setSaindo(false);
+      router.replace('/');
     }
   };
 
@@ -140,7 +147,9 @@ export default function PerfilScreen() {
       if (novaSenha !== confirmarSenha) return notificar('erro', 'Senhas não conferem', 'A confirmação de senha deve ser igual à nova senha.');
       setSessoes(prev => prev.filter(s => s.atual));
     }
-    setSenhaAtual(''); setNovaSenha(''); setConfirmarSenha('');
+    setSenhaAtual('');
+    setNovaSenha('');
+    setConfirmarSenha('');
     setModalPrivacidade(false);
     notificar(
       'sucesso',
@@ -174,7 +183,8 @@ export default function PerfilScreen() {
         timestamp: agora.getTime(),
         criadoEm: serverTimestamp(),
       });
-      setModalAjuda(false); setTextoChamado('');
+      setModalAjuda(false);
+      setTextoChamado('');
       notificar('sucesso', 'Chamado enviado', 'Ticket encaminhado para a equipe de TI.');
     } catch (error: any) {
       notificar('erro', 'Erro ao enviar chamado', error?.message || 'Falha ao gravar no Firestore.');
@@ -200,9 +210,12 @@ export default function PerfilScreen() {
       notificar('sucesso', 'Aviso publicado!', 'Comunicado gravado e enviado ao mural geral.');
     } catch (error: any) {
       notificar('erro', 'Erro ao publicar', error?.message || 'Não foi possível salvar o comunicado.');
-    } finally { setPublicandoAviso(false); }
+    } finally {
+      setPublicandoAviso(false);
+    }
   };
 
+  // === CALENDÁRIO E PARÂMETROS DA INSTITUIÇÃO ===
   const handleAdicionarEvento = () => {
     if (!novoEvento.titulo.trim() || !novoEvento.periodo.trim()) {
       return notificar('aviso', 'Campos obrigatórios', 'Informe o título e o período/data.');
@@ -227,7 +240,6 @@ export default function PerfilScreen() {
     try {
       const novosParaAvisar = eventos.filter(ev => ev.pendenteAviso);
       const eventosLimpos = eventos.map(({ pendenteAviso, ...resto }) => resto);
-
       await setDoc(doc(db, 'instituicao', 'config'), {
         anoLetivo: anoLetivo.trim() || '2026',
         toleranciaChamadaMin: Number(toleranciaChamadaMin) || 15,
@@ -251,7 +263,6 @@ export default function PerfilScreen() {
           )
         );
       }
-
       setEventos(eventosLimpos);
       setModalInstituicao(false);
       notificar(
@@ -263,15 +274,19 @@ export default function PerfilScreen() {
       );
     } catch (error: any) {
       notificar('erro', 'Erro ao salvar', error?.message || 'Falha ao gravar configurações.');
-    } finally { setSalvandoInst(false); }
+    } finally {
+      setSalvandoInst(false);
+    }
   };
 
+  // === FERRAMENTAS ADMINISTRATIVAS (INTEGRIDADE, BACKUP E LIMPEZA) ===
   const setEtapaStatus = (id: string, status: EtapaStatus, detalhe?: string, erro?: string) =>
     setEtapasIntegridade(prev => prev.map(e => (e.id === id ? { ...e, status, detalhe: detalhe ?? e.detalhe, erro } : e)));
 
   const handleVerificarIntegridade = async () => {
     if (verificandoIntegridade) return;
-    setVerificandoIntegridade(true); setResumoIntegridade(null);
+    setVerificandoIntegridade(true);
+    setResumoIntegridade(null);
     setEtapasIntegridade(ETAPAS_INICIAIS.map(e => ({ ...e, status: 'pendente', erro: undefined })));
     setModalIntegridade(true);
     const t0 = Date.now();
@@ -284,8 +299,11 @@ export default function PerfilScreen() {
 
       setEtapaStatus('colecoes', 'rodando', 'Lendo coleções do banco...');
       const [gradeSnap, alunosSnap, usersSnap, chamadosSnap, chamadasSnap] = await Promise.all([
-        getDocs(collection(db, 'grade_aulas')), getDocs(collection(db, 'alunos')), getDocs(collection(db, 'usuarios')),
-        getDocs(collection(db, 'chamados_suporte')), getDocs(collection(db, 'chamadas')),
+        getDocs(collection(db, 'grade_aulas')),
+        getDocs(collection(db, 'alunos')),
+        getDocs(collection(db, 'usuarios')),
+        getDocs(collection(db, 'chamados_suporte')),
+        getDocs(collection(db, 'chamadas')),
       ]);
       setEtapaStatus('colecoes', 'ok', `${turmasSnap.size} turmas · ${gradeSnap.size} aulas · ${alunosSnap.size} alunos · ${usersSnap.size} usuários`);
       await esperar(200);
@@ -312,7 +330,9 @@ export default function PerfilScreen() {
         return prev.map(e => (e.id === atual.id ? { ...e, status: 'erro', erro: msgErro } : e));
       });
       setResumoIntegridade(`Falha na verificação: ${msgErro}`);
-    } finally { setVerificandoIntegridade(false); }
+    } finally {
+      setVerificandoIntegridade(false);
+    }
   };
 
   const salvarBackup = async (conteudoJson: string, nomeArquivo: string, resumoFallback: string) => {
@@ -320,15 +340,15 @@ export default function PerfilScreen() {
       const blob = new Blob([conteudoJson], { type: 'application/json;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = nomeArquivo; a.click();
+      a.href = url;
+      a.download = nomeArquivo;
+      a.click();
       URL.revokeObjectURL(url);
       return `Backup ${nomeArquivo} baixado no navegador.`;
     }
     try {
-      const fsMod = 'expo-file-system';
-      const shareMod = 'expo-sharing';
-      const FileSystem: any = await import(/* webpackIgnore: true */ fsMod);
-      const Sharing: any = await import(/* webpackIgnore: true */ shareMod);
+      const FileSystem: any = await import(/* webpackIgnore: true */ 'expo-file-system');
+      const Sharing: any = await import(/* webpackIgnore: true */ 'expo-sharing');
       const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
       if (!baseDir) return `Pacote preparado em memória (${resumoFallback}).`;
       const destino = `${baseDir}${nomeArquivo}`;
@@ -345,7 +365,8 @@ export default function PerfilScreen() {
 
   const executarBackupEmSegundoPlano = async () => {
     if (backupEmAndamento) return;
-    setBackupEmAndamento(true); setProgressoBackup(5);
+    setBackupEmAndamento(true);
+    setProgressoBackup(5);
     setEtapaBackupTexto('Iniciando backup em segundo plano...');
     try {
       const pacote: Record<string, any[]> = {};
@@ -360,8 +381,10 @@ export default function PerfilScreen() {
       setEtapaBackupTexto('Consolidando dados do sistema e alunos...');
       setProgressoBackup(95);
       const manifesto = {
-        sistema: 'Violeta - Gestão Educacional', plataforma: Platform.OS,
-        geradoEm: new Date().toISOString(), geradoPor: `${usuario.nome} (${usuario.cargo})`,
+        sistema: 'Violeta - Gestão Educacional',
+        plataforma: Platform.OS,
+        geradoEm: new Date().toISOString(),
+        geradoPor: `${usuario.nome} (${usuario.cargo})`,
         totais: Object.fromEntries(Object.entries(pacote).map(([k, v]) => [k, v.length])),
       };
       const nomeArquivo = `backup-violeta-${new Date().toISOString().slice(0, 10)}.json`;
@@ -376,7 +399,10 @@ export default function PerfilScreen() {
     } catch (error: any) {
       setEtapaBackupTexto('Erro ao gerar backup.');
       notificar('erro', 'Erro no backup', error?.message || 'Não foi possível concluir o backup.');
-    } finally { await esperar(800); setBackupEmAndamento(false); }
+    } finally {
+      await esperar(800);
+      setBackupEmAndamento(false);
+    }
   };
 
   const executarLimpezaDadosTeste = async () => {
@@ -399,17 +425,14 @@ export default function PerfilScreen() {
       notificar('sucesso', 'Limpeza concluída', `${removidos} registro(s) de teste removido(s).`);
     } catch (error: any) {
       notificar('erro', 'Erro na limpeza', error?.message || 'Não foi possível remover os registros de teste.');
-    } finally { setLimpandoTeste(false); }
+    } finally {
+      setLimpandoTeste(false);
+    }
   };
 
-  const toastProps = {
-    feedback,
-    onFechar: fecharFeedback,
-    fundoCard: tema.fundoTopo,
-    textoPrincipal: tema.textoPrincipal,
-    textoSecundario: tema.textoSecundario,
-  };
+  const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
 
+  // === COMPONENTE AUXILIAR DE MENU ===
   const MenuOption = ({ icone, titulo, subtitulo = null, corIcone = tema.textoSecundario, danger = false, onPress, desativado = false }: any) => (
     <TouchableOpacity style={[styles.menuItem, { borderBottomColor: tema.borda, opacity: desativado ? 0.55 : 1 }]} activeOpacity={0.7} onPress={onPress} disabled={desativado}>
       <View style={[styles.iconContainer, { backgroundColor: danger ? '#FFEBEE' : tema.inputBackground }]}>
@@ -423,24 +446,30 @@ export default function PerfilScreen() {
     </TouchableOpacity>
   );
 
+  // === INTERFACE ===
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView style={[styles.container, { backgroundColor: tema.fundoBase }]} showsVerticalScrollIndicator={false}>
-        <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
+        {/* Cabeçalho do Perfil com Marca d'água VIOLETA */}
+        <View style={[styles.header, { backgroundColor: tema.fundoTopo, overflow: 'hidden' }]}>
+          <Image source={ICONE_VIOLETA} style={styles.headerWatermark} resizeMode="cover" pointerEvents="none" />
           <View style={styles.headerTopRow}>
             <TouchableOpacity onPress={voltar} style={styles.btnVoltar}><Ionicons name="arrow-back" size={26} color={tema.textoLogo} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => setPerfil(perfil === 'admin' ? 'coordenador' : perfil === 'coordenador' ? 'professor' : 'admin')} style={styles.btnToggleCargo}>
-              <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>Simular Perfil</Text>
-            </TouchableOpacity>
+            {perfilReal === 'admin' && (
+              <TouchableOpacity onPress={() => setPerfil(perfil === 'admin' ? 'coordenador' : perfil === 'coordenador' ? 'professor' : 'admin')} style={styles.btnToggleCargo}>
+                <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>Simular Perfil</Text>
+              </TouchableOpacity>
+            )}
           </View>
-          <View style={styles.avatarContainer}><Text style={styles.avatarText}>{usuario.iniciais}</Text></View>
+          <View style={styles.avatarContainer}><Text style={[styles.avatarText, { color: tema.botaoPrimario }]}>{usuario.iniciais}</Text></View>
           <Text style={[styles.nomeUsuario, { color: tema.textoLogo, fontSize: tamFonte(22) }]}>{usuario.nome}</Text>
-          <View style={[styles.badgeCargo, { backgroundColor: perfil === 'admin' ? '#D32F2F' : perfil === 'coordenador' ? '#E65100' : 'rgba(255,255,255,0.2)' }]}>
+          <View style={[styles.badgeCargo, { backgroundColor: perfil === 'admin' ? '#D32F2F' : perfil === 'coordenador' ? '#E65100' : 'rgba(124, 124, 255, 0.25)' }]}>
             <Text style={styles.textoBadge}>{usuario.cargo}</Text>
           </View>
           <Text style={[styles.emailUsuario, { color: tema.textoLogo, fontSize: tamFonte(14) }]}>{usuario.email}</Text>
         </View>
 
+        {/* Seções por Perfil */}
         {perfil === 'admin' ? (
           <>
             <View style={styles.section}>
@@ -451,7 +480,6 @@ export default function PerfilScreen() {
                 <MenuOption icone="business" titulo="Dados da Instituição" subtitulo="Cronograma (Coordenação) e regras (Infra)" corIcone="#D32F2F" onPress={() => setModalInstituicao(true)} />
               </View>
             </View>
-
             <View style={styles.section}>
               <Text style={[styles.sectionTitle, { color: '#2E7D32' }]}>Banco de Dados</Text>
               <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: '#2E7D32' }]}>
@@ -487,6 +515,7 @@ export default function PerfilScreen() {
           )
         )}
 
+        {/* Conta, Sistema e Saída */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: tema.textoSecundario }]}>Sua Conta</Text>
           <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
@@ -494,7 +523,6 @@ export default function PerfilScreen() {
             <MenuOption icone="shield-checkmark" titulo="Segurança e Preferências" corIcone={tema.botaoPrimario} onPress={() => setModalPrivacidade(true)} />
           </View>
         </View>
-
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: tema.textoSecundario }]}>Sistema Violeta</Text>
           <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
@@ -506,15 +534,39 @@ export default function PerfilScreen() {
             <MenuOption icone="information-circle" titulo="Sobre o Aplicativo" subtitulo="Créditos e Versão" onPress={() => setModalVersao(true)} />
           </View>
         </View>
-
         <View style={[styles.section, { marginTop: 10, marginBottom: 40 }]}>
           <View style={[styles.cardMenu, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-            <MenuOption icone="log-out" titulo="Encerrar Sessão" danger onPress={handleLogout} />
+            <MenuOption icone="log-out" titulo="Encerrar Sessão" danger onPress={() => setModalLogout(true)} />
           </View>
         </View>
       </ScrollView>
 
-      {/* MODAL: SESSÕES ATIVAS */}
+      {/* Modal: Confirmação de Logout */}
+      <Modal visible={modalLogout} transparent animationType="fade" onRequestClose={() => setModalLogout(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCardCentro, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
+              <Text style={[styles.modalTitle, { color: tema.textoPrincipal, fontSize: tamFonte(18) }]}>Encerrar Sessão</Text>
+              <TouchableOpacity onPress={() => setModalLogout(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
+            </View>
+            <View style={{ padding: 20 }}>
+              <Text style={{ color: tema.textoSecundario, fontSize: tamFonte(14), lineHeight: 20 }}>
+                Deseja realmente sair da sua conta no sistema Violeta?
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
+                <TouchableOpacity style={[styles.btnSecModal, { borderColor: tema.borda, backgroundColor: tema.inputBackground }]} onPress={() => setModalLogout(false)} disabled={saindo}>
+                  <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: tamFonte(13) }}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.btnPrimModal, { backgroundColor: '#C62828' }]} onPress={() => void confirmarLogout()} disabled={saindo}>
+                  <Text style={{ color: '#FFF', fontWeight: '700', fontSize: tamFonte(13) }}>{saindo ? 'Saindo...' : 'Sair'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: Sessões Ativas */}
       <Modal visible={modalSessoes} transparent animationType="fade" onRequestClose={() => setModalSessoes(false)}>
         <View style={[styles.modalOverlay, styles.overlayDestaque]}>
           <View style={[styles.modalCardCentro, styles.cardDestaque, { backgroundColor: tema.fundoBase, borderColor: tema.botaoPrimario }]}>
@@ -526,21 +578,15 @@ export default function PerfilScreen() {
                     <Text style={{ color: '#C62828', fontSize: tamFonte(11), fontWeight: '700' }}>Encerrar outras</Text>
                   </TouchableOpacity>
                 )}
-                <TouchableOpacity onPress={() => setModalSessoes(false)}>
-                  <Ionicons name="close" size={24} color={tema.textoSecundario} />
-                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setModalSessoes(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
               </View>
             </View>
             <ScrollView contentContainerStyle={{ padding: 18 }}>
               {sessoes.map(s => (
                 <View key={s.id} style={[styles.cardSessao, { borderColor: tema.borda, backgroundColor: tema.inputBackground, marginBottom: 10, justifyContent: 'space-between' }]}>
                   <View style={{ flex: 1, marginRight: 10 }}>
-                    <Text style={[styles.tituloLinha, { color: tema.textoPrincipal, fontSize: tamFonte(14) }]}>
-                      {s.dispositivo} {s.atual ? '• Atual' : ''}
-                    </Text>
-                    <Text style={[styles.subtituloLinha, { color: tema.textoSecundario, fontSize: tamFonte(12) }]}>
-                      {s.local} • {s.horario}
-                    </Text>
+                    <Text style={[styles.tituloLinha, { color: tema.textoPrincipal, fontSize: tamFonte(14) }]}>{s.dispositivo} {s.atual ? '• Atual' : ''}</Text>
+                    <Text style={[styles.subtituloLinha, { color: tema.textoSecundario, fontSize: tamFonte(12) }]}>{s.local} • {s.horario}</Text>
                   </View>
                   {!s.atual && (
                     <TouchableOpacity onPress={() => encerrarSessaoIndividual(s.id)} style={[styles.btnSessaoPequeno, { borderColor: '#C62828', backgroundColor: '#C6282815' }]}>
@@ -555,6 +601,7 @@ export default function PerfilScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Confirmação Limpeza de Testes */}
       <Modal visible={confirmarLimpezaTeste} transparent animationType="fade" onRequestClose={() => setConfirmarLimpezaTeste(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCardCentro, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -563,9 +610,7 @@ export default function PerfilScreen() {
               <TouchableOpacity onPress={() => setConfirmarLimpezaTeste(false)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
             <View style={{ padding: 20 }}>
-              <Text style={{ color: tema.textoSecundario, fontSize: tamFonte(13), lineHeight: 19 }}>
-                Remover registros marcados como [TESTE] em turmas e chamados?
-              </Text>
+              <Text style={{ color: tema.textoSecundario, fontSize: tamFonte(13), lineHeight: 19 }}>Remover registros marcados como [TESTE] em turmas e chamados?</Text>
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
                 <TouchableOpacity style={[styles.btnSecModal, { borderColor: tema.borda, backgroundColor: tema.inputBackground }]} onPress={() => setConfirmarLimpezaTeste(false)}>
                   <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: tamFonte(13) }}>Cancelar</Text>
@@ -580,6 +625,7 @@ export default function PerfilScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Diagnóstico de Integridade */}
       <Modal visible={modalIntegridade} transparent animationType="fade" onRequestClose={() => setModalIntegridade(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCardCentro, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -613,7 +659,7 @@ export default function PerfilScreen() {
                   <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: tamFonte(13) }}>Testar Novamente</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.btnPrimModal, { backgroundColor: tema.botaoPrimario }]} onPress={() => setModalIntegridade(false)}>
-                  <Text style={{ color: '#FFF', fontWeight: '700', fontSize: tamFonte(13) }}>Concluir</Text>
+                  <Text style={{ color: tema.textoBotao, fontWeight: '700', fontSize: tamFonte(13) }}>Concluir</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -622,6 +668,7 @@ export default function PerfilScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Dados da Instituição / Calendário */}
       <Modal visible={modalInstituicao} transparent animationType="slide" onRequestClose={() => setModalInstituicao(false)}>
         <View style={styles.modalOverlayFull}>
           <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
@@ -637,8 +684,8 @@ export default function PerfilScreen() {
                   {(['calendario', 'infra'] as const).map(aba => {
                     const ativo = abaInstituicao === aba;
                     return (
-                      <TouchableOpacity key={aba} onPress={() => setAbaInstituicao(aba)} style={[styles.chipAba, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: tema.borda }]}>
-                        <Text style={{ color: ativo ? '#FFF' : tema.textoPrincipal, fontWeight: '700', fontSize: tamFonte(12) }}>
+                      <TouchableOpacity key={aba} onPress={() => setAbaInstituicao(aba)} style={[styles.chipAba, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: ativo ? tema.botaoPrimario : tema.borda }]}>
+                        <Text style={{ color: ativo ? tema.textoBotao : tema.textoPrincipal, fontWeight: '700', fontSize: tamFonte(12) }}>
                           {aba === 'calendario' ? 'Cronograma / Pausas (Coord.)' : 'Parâmetros Técnicos (Infra)'}
                         </Text>
                       </TouchableOpacity>
@@ -659,9 +706,7 @@ export default function PerfilScreen() {
                     <View key={ev.id} style={[styles.cardSessao, { borderColor: ev.pendenteAviso ? tema.botaoPrimario : tema.borda, backgroundColor: tema.inputBackground, marginTop: 10, justifyContent: 'space-between' }]}>
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.tituloLinha, { color: tema.textoPrincipal, fontSize: tamFonte(15) }]}>{ev.titulo}</Text>
-                        <Text style={[styles.subtituloLinha, { color: tema.textoSecundario, fontSize: tamFonte(12) }]}>
-                          {ev.periodo} • {ev.setor}{ev.pendenteAviso ? ' • Novo (avisará todos)' : ''}
-                        </Text>
+                        <Text style={[styles.subtituloLinha, { color: tema.textoSecundario, fontSize: tamFonte(12) }]}>{ev.periodo} • {ev.setor}{ev.pendenteAviso ? ' • Novo (avisará todos)' : ''}</Text>
                       </View>
                       <TouchableOpacity onPress={() => setEventos(prev => prev.filter(x => x.id !== ev.id))}><Ionicons name="trash-outline" size={18} color="#C62828" /></TouchableOpacity>
                     </View>
@@ -683,8 +728,8 @@ export default function PerfilScreen() {
                 </>
               )}
               <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: tema.botaoPrimario }]} onPress={() => void handleSalvarInstituicao()} disabled={salvandoInst}>
-                <Ionicons name="save-outline" size={20} color="#FFF" style={{ marginRight: 8 }} />
-                <Text style={[styles.textoBtnLargo, { fontSize: tamFonte(15) }]}>{salvandoInst ? 'Salvando...' : 'Salvar Configurações'}</Text>
+                <Ionicons name="save-outline" size={20} color={tema.textoBotao} style={{ marginRight: 8 }} />
+                <Text style={[styles.textoBtnLargo, { color: tema.textoBotao, fontSize: tamFonte(15) }]}>{salvandoInst ? 'Salvando...' : 'Salvar Configurações'}</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -692,6 +737,7 @@ export default function PerfilScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Meus Dados */}
       <Modal visible={modalDados} transparent animationType="slide">
         <View style={styles.modalOverlayFull}>
           <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
@@ -701,8 +747,8 @@ export default function PerfilScreen() {
             </View>
             <ScrollView style={styles.modalBody}>
               <View style={styles.avatarEdicaoContainer}>
-                <View style={styles.avatarEdicao}><Text style={styles.avatarText}>{usuario.iniciais}</Text></View>
-                <TouchableOpacity style={styles.btnAlterarFoto}><Ionicons name="camera" size={16} color="#FFF" /></TouchableOpacity>
+                <View style={styles.avatarEdicao}><Text style={[styles.avatarText, { color: tema.botaoPrimario }]}>{usuario.iniciais}</Text></View>
+                <TouchableOpacity style={[styles.btnAlterarFoto, { backgroundColor: tema.botaoPrimario }]}><Ionicons name="camera" size={16} color={tema.textoBotao} /></TouchableOpacity>
               </View>
               <Text style={[styles.inputLabel, { color: tema.textoPrincipal, fontSize: tamFonte(14) }]}>Nome de Exibição:</Text>
               <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14) }]} value={formDados.nome} onChangeText={t => setFormDados({ ...formDados, nome: t })} />
@@ -713,7 +759,8 @@ export default function PerfilScreen() {
               <Text style={[styles.inputLabel, { color: tema.textoPrincipal, fontSize: tamFonte(14), marginTop: 15 }]}>Endereço Completo:</Text>
               <TextInput style={[styles.inputAreaEnd, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14) }]} value={formDados.endereco} multiline onChangeText={t => setFormDados({ ...formDados, endereco: t })} />
               <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: tema.botaoPrimario }]} onPress={handleSalvarDados}>
-                <Ionicons name="save-outline" size={20} color="#FFF" style={{ marginRight: 8 }} /><Text style={[styles.textoBtnLargo, { fontSize: tamFonte(15) }]}>Salvar Alterações</Text>
+                <Ionicons name="save-outline" size={20} color={tema.textoBotao} style={{ marginRight: 8 }} />
+                <Text style={[styles.textoBtnLargo, { color: tema.textoBotao, fontSize: tamFonte(15) }]}>Salvar Alterações</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -721,6 +768,7 @@ export default function PerfilScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Segurança e Preferências */}
       <Modal visible={modalPrivacidade} transparent animationType="slide">
         <View style={styles.modalOverlayFull}>
           <View style={[styles.modalContentFull, { backgroundColor: tema.fundoBase }]}>
@@ -730,13 +778,10 @@ export default function PerfilScreen() {
             </View>
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <Text style={[styles.topicoSeguranca, { color: tema.botaoPrimario, fontSize: tamFonte(13) }]}>Alterar Senha</Text>
-              <Text style={[styles.avisoSenha, { color: tema.textoSecundario, fontSize: tamFonte(12) }]}>
-                Alterar senha irá desconectar todas as sessões, sendo necessário realizar login novamente.
-              </Text>
+              <Text style={[styles.avisoSenha, { color: tema.textoSecundario, fontSize: tamFonte(12) }]}>Alterar senha irá desconectar todas as sessões, sendo necessário realizar login novamente.</Text>
               <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14) }]} placeholder="Senha Atual" secureTextEntry placeholderTextColor={tema.textoSecundario} value={senhaAtual} onChangeText={setSenhaAtual} />
               <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14), marginTop: 10 }]} placeholder="Nova Senha" secureTextEntry placeholderTextColor={tema.textoSecundario} value={novaSenha} onChangeText={setNovaSenha} />
               <TextInput style={[styles.input, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14), marginTop: 10 }]} placeholder="Confirmar Nova Senha" secureTextEntry placeholderTextColor={tema.textoSecundario} value={confirmarSenha} onChangeText={setConfirmarSenha} />
-
               <Text style={[styles.topicoSeguranca, { color: tema.botaoPrimario, fontSize: tamFonte(13), marginTop: 26 }]}>Tema do Aplicativo</Text>
               <View style={styles.rowOpcoes}>
                 {(['Sistema', 'Claro', 'Escuro'] as ModoTema[]).map(m => {
@@ -748,7 +793,6 @@ export default function PerfilScreen() {
                   );
                 })}
               </View>
-
               <Text style={[styles.topicoSeguranca, { color: tema.botaoPrimario, fontSize: tamFonte(13), marginTop: 26 }]}>Preferências Visuais (Fonte)</Text>
               <View style={styles.rowOpcoes}>
                 {(['Pequena', 'Média', 'Grande'] as TamanhoFonte[]).map(tam => {
@@ -760,7 +804,6 @@ export default function PerfilScreen() {
                   );
                 })}
               </View>
-
               <Text style={[styles.topicoSeguranca, { color: tema.botaoPrimario, fontSize: tamFonte(13), marginTop: 26 }]}>Alertas e Sessão</Text>
               <TouchableOpacity style={[styles.cardSessao, { borderColor: tema.borda, backgroundColor: tema.inputBackground, marginBottom: 12 }]} onPress={() => setAlertasAtivos(a => !a)}>
                 <Ionicons name={alertasAtivos ? 'notifications' : 'notifications-off'} size={24} color={alertasAtivos ? '#2E7D32' : tema.textoSecundario} style={{ marginRight: 14 }} />
@@ -770,7 +813,6 @@ export default function PerfilScreen() {
                 </View>
                 <Ionicons name={alertasAtivos ? 'notifications' : 'notifications-off'} size={22} color={alertasAtivos ? '#2E7D32' : tema.textoSecundario} />
               </TouchableOpacity>
-
               <View style={[styles.cardSessao, { borderColor: tema.borda, backgroundColor: tema.inputBackground }]}>
                 <Ionicons name="desktop-outline" size={24} color="#2E7D32" style={{ marginRight: 14 }} />
                 <View style={{ flex: 1 }}>
@@ -778,17 +820,13 @@ export default function PerfilScreen() {
                   <Text style={[styles.subtituloLinha, { color: tema.textoSecundario, fontSize: tamFonte(12) }]}>Salvador, BA • {sessoes.length} sessão(ões) ativa(s)</Text>
                 </View>
               </View>
-
-              <TouchableOpacity
-                style={[styles.btnVerSessoes, { borderColor: tema.botaoPrimario, backgroundColor: tema.botaoPrimario + '15' }]}
-                onPress={() => { setModalPrivacidade(false); setModalSessoes(true); }}
-              >
+              <TouchableOpacity style={[styles.btnVerSessoes, { borderColor: tema.botaoPrimario, backgroundColor: tema.botaoPrimario + '15' }]} onPress={() => { setModalPrivacidade(false); setModalSessoes(true); }}>
                 <Ionicons name="phone-portrait-outline" size={18} color={tema.botaoPrimario} />
                 <Text style={{ color: tema.botaoPrimario, fontWeight: '700', fontSize: tamFonte(14) }}>Ver sessões ativas</Text>
               </TouchableOpacity>
-
               <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: tema.botaoPrimario, marginTop: 12 }]} onPress={handleSalvarPreferencias}>
-                <Ionicons name="save-outline" size={20} color="#FFF" style={{ marginRight: 8 }} /><Text style={[styles.textoBtnLargo, { fontSize: tamFonte(15) }]}>Salvar Informações</Text>
+                <Ionicons name="save-outline" size={20} color={tema.textoBotao} style={{ marginRight: 8 }} />
+                <Text style={[styles.textoBtnLargo, { color: tema.textoBotao, fontSize: tamFonte(15) }]}>Salvar Informações</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -796,6 +834,7 @@ export default function PerfilScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Abrir Chamado Técnico */}
       <Modal visible={modalAjuda} transparent animationType="slide">
         <TouchableOpacity style={styles.modalOverlayHalf} activeOpacity={1} onPress={() => setModalAjuda(false)}>
           <TouchableOpacity activeOpacity={1} style={[styles.modalContentHalf, { backgroundColor: tema.fundoBase }]}>
@@ -805,13 +844,16 @@ export default function PerfilScreen() {
             </View>
             <View style={styles.modalBody}>
               <TextInput style={[styles.inputArea, { backgroundColor: tema.inputBackground, borderColor: tema.borda, color: tema.textoPrincipal, fontSize: tamFonte(14) }]} placeholder="Descreva o problema..." placeholderTextColor={tema.textoSecundario} multiline value={textoChamado} onChangeText={setTextoChamado} />
-              <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: tema.botaoPrimario }]} onPress={() => void handleEnviarChamado()}><Text style={[styles.textoBtnLargo, { fontSize: tamFonte(15) }]}>Enviar Ticket</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.btnAcaoLargo, { backgroundColor: tema.botaoPrimario }]} onPress={() => void handleEnviarChamado()}>
+                <Text style={[styles.textoBtnLargo, { color: tema.textoBotao, fontSize: tamFonte(15) }]}>Enviar Ticket</Text>
+              </TouchableOpacity>
             </View>
           </TouchableOpacity>
           <FeedbackToast {...toastProps} />
         </TouchableOpacity>
       </Modal>
 
+      {/* Modal: Novo Comunicado Oficial */}
       <Modal visible={modalAviso} transparent animationType="slide">
         <TouchableOpacity style={styles.modalOverlayHalf} activeOpacity={1} onPress={() => setModalAviso(false)}>
           <TouchableOpacity activeOpacity={1} style={[styles.modalContentHalf, { backgroundColor: tema.fundoBase }]}>
@@ -831,10 +873,13 @@ export default function PerfilScreen() {
         </TouchableOpacity>
       </Modal>
 
+      {/* Modal: Sobre o Aplicativo */}
       <Modal visible={modalVersao} transparent animationType="fade">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setModalVersao(false)}>
           <View style={[styles.modalVersaoContent, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
-            <Ionicons name="layers" size={65} color={tema.botaoPrimario} style={{ marginBottom: 15 }} />
+            <View style={[styles.versaoIconeBox, { borderColor: tema.botaoPrimario }]}>
+              <Image source={ICONE_VIOLETA} style={styles.versaoIconeImg} resizeMode="cover" />
+            </View>
             <Text style={[styles.versaoAppNome, { color: tema.textoPrincipal }]}>VIOLETA</Text>
             <Text style={[styles.versaoTagline, { color: tema.textoSecundario }]}>Gestão Educacional</Text>
             <View style={[styles.versaoBadge, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
@@ -842,9 +887,9 @@ export default function PerfilScreen() {
             </View>
             <View style={[styles.versaoLinha, { borderBottomColor: tema.borda }]} />
             <Text style={[styles.tituloCreditos, { color: tema.textoSecundario }]}>DESENVOLVIDO POR</Text>
+            <Text style={[styles.nomeCredito, { color: tema.textoPrincipal, fontWeight: '800' }]}>Aryane Andrade</Text>
             <Text style={[styles.nomeCredito, { color: tema.textoPrincipal, fontWeight: '800' }]}>Larissa Alves</Text>
-            <Text style={[styles.nomeCredito, { color: tema.textoPrincipal, fontWeight: '800' }]}>Aryane</Text>
-            <Text style={[styles.nomeCredito, { color: tema.botaoPrimario, fontWeight: '900', marginTop: 4 }]}>LuffyBaiano</Text>
+            <Text style={[styles.nomeCredito, { color: tema.textoPrincipal, fontWeight: '900', marginTop: 4 }]}>João Marcelo ( LuffyBaiano )</Text>
             <View style={{ marginTop: 25, alignItems: 'center' }}>
               <Text style={[styles.versaoCreditosMenor, { color: tema.textoSecundario }]}>Salvador, BA - 2026</Text>
               <Text style={[styles.versaoDireitos, { color: tema.textoSecundario }]}>© Todos os direitos reservados.</Text>
@@ -858,24 +903,31 @@ export default function PerfilScreen() {
   );
 }
 
+// === ESTILOS ===
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { alignItems: 'center', paddingTop: 50, paddingBottom: 30, borderBottomLeftRadius: 30, borderBottomRightRadius: 30, elevation: 5 },
-  headerTopRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 10 },
-  btnVoltar: { padding: 5 }, btnToggleCargo: { padding: 5, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 8 },
+  headerWatermark: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: 0.18 },  headerTopRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 10 },
+  btnVoltar: { padding: 5 },
+  btnToggleCargo: { paddingHorizontal: 8, paddingVertical: 5, backgroundColor: 'rgba(124, 124, 255, 0.22)', borderWidth: 1, borderColor: 'rgba(165, 158, 196, 0.3)', borderRadius: 8 },
   avatarContainer: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
-  avatarText: { fontSize: 32, fontWeight: 'bold', color: '#1565C0' },
+  avatarText: { fontSize: 32, fontWeight: 'bold' },
   nomeUsuario: { fontSize: 22, fontWeight: 'bold', marginBottom: 5 },
   badgeCargo: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginBottom: 8 },
-  textoBadge: { color: '#FFF', fontSize: 12, fontWeight: 'bold' }, emailUsuario: { fontSize: 14, opacity: 0.8 },
-  section: { paddingHorizontal: 20, marginTop: 25 }, sectionTitle: { fontSize: 12, fontWeight: '900', marginBottom: 8, marginLeft: 5 },
+  textoBadge: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+  emailUsuario: { fontSize: 14, opacity: 0.85 },
+  section: { paddingHorizontal: 20, marginTop: 25 },
+  sectionTitle: { fontSize: 12, fontWeight: '900', marginBottom: 8, marginLeft: 5 },
   cardMenu: { borderWidth: 1, borderRadius: 16, overflow: 'hidden' },
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 15, borderBottomWidth: StyleSheet.hairlineWidth },
   iconContainer: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
-  menuTextContainer: { flex: 1 }, menuTitle: { fontSize: 15, fontWeight: 'bold' }, menuSubtitle: { fontSize: 12, marginTop: 2 },
+  menuTextContainer: { flex: 1 },
+  menuTitle: { fontSize: 15, fontWeight: 'bold' },
+  menuSubtitle: { fontSize: 12, marginTop: 2 },
   cardProgressoBackup: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 10 },
   linhaProgressoTopo: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  trilhaBarra: { height: 7, borderRadius: 6, overflow: 'hidden' }, preenchimentoBarra: { height: '100%', borderRadius: 6 },
+  trilhaBarra: { height: 7, borderRadius: 6, overflow: 'hidden' },
+  preenchimentoBarra: { height: '100%', borderRadius: 6 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 18 },
   overlayDestaque: { zIndex: 9999, elevation: 30, backgroundColor: 'rgba(0,0,0,0.82)' },
   modalCardCentro: { width: '100%', maxHeight: '85%', borderRadius: 20, borderWidth: 1, overflow: 'hidden' },
@@ -892,7 +944,9 @@ const styles = StyleSheet.create({
   modalOverlayHalf: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalContentHalf: { borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingBottom: 40 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold' }, btnFecharModal: { padding: 5 }, modalBody: { padding: 20 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold' },
+  btnFecharModal: { padding: 5 },
+  modalBody: { padding: 20 },
   topicoSeguranca: { fontSize: 13, fontWeight: '900', marginBottom: 8 },
   avisoSenha: { lineHeight: 17, marginBottom: 12 },
   input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 15, height: 50 },
@@ -901,21 +955,28 @@ const styles = StyleSheet.create({
   btnEncerrarOutras: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
   btnAcaoLargo: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', height: 50, borderRadius: 10, marginTop: 25, marginBottom: 20 },
   textoBtnLargo: { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
-  tituloLinha: { fontSize: 15, fontWeight: 'bold' }, subtituloLinha: { fontSize: 12, marginTop: 2 },
+  tituloLinha: { fontSize: 15, fontWeight: 'bold' },
+  subtituloLinha: { fontSize: 12, marginTop: 2 },
   cardSessao: { flexDirection: 'row', alignItems: 'center', padding: 15, borderWidth: 1, borderRadius: 12 },
   btnSessaoPequeno: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  inputLabel: { fontSize: 14, fontWeight: 'bold', marginBottom: 6 }, inputDisabled: { opacity: 0.6 },
+  inputLabel: { fontSize: 14, fontWeight: 'bold', marginBottom: 6 },
+  inputDisabled: { opacity: 0.6 },
   inputAreaEnd: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 15, paddingTop: 15, height: 80 },
   inputArea: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 15, paddingTop: 15, height: 120 },
   avatarEdicaoContainer: { alignSelf: 'center', marginBottom: 25 },
   avatarEdicao: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center' },
-  btnAlterarFoto: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#1565C0', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: '#FFF' },
+  btnAlterarFoto: { position: 'absolute', bottom: 0, right: 0, width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: '#FFF' },
   btnPreferencia: { flex: 1, alignItems: 'center', paddingVertical: 12, borderWidth: 1, borderRadius: 8 },
   modalVersaoContent: { width: '85%', borderRadius: 25, padding: 35, alignItems: 'center', borderWidth: 1 },
+  versaoIconeBox: { width: 76, height: 76, borderRadius: 20, borderWidth: 1.5, overflow: 'hidden', marginBottom: 15 },
+  versaoIconeImg: { width: '100%', height: '100%' },
   versaoAppNome: { fontSize: 28, fontWeight: '900', letterSpacing: 3, marginBottom: 2 },
   versaoTagline: { fontSize: 12, fontStyle: 'italic', marginBottom: 15, letterSpacing: 1 },
   versaoBadge: { paddingHorizontal: 15, paddingVertical: 6, borderRadius: 20, borderWidth: 1, marginBottom: 20 },
-  versaoAppNumero: { fontSize: 12, fontWeight: 'bold' }, versaoLinha: { width: '40%', borderBottomWidth: 2, marginBottom: 25, opacity: 0.5 },
-  tituloCreditos: { fontSize: 10, fontWeight: 'bold', letterSpacing: 2, marginBottom: 10 }, nomeCredito: { fontSize: 16, marginBottom: 2, letterSpacing: 0.5 },
-  versaoCreditosMenor: { fontSize: 11, marginBottom: 5 }, versaoDireitos: { fontSize: 10, fontStyle: 'italic' },
+  versaoAppNumero: { fontSize: 12, fontWeight: 'bold' },
+  versaoLinha: { width: '40%', borderBottomWidth: 2, marginBottom: 25, opacity: 0.5 },
+  tituloCreditos: { fontSize: 10, fontWeight: 'bold', letterSpacing: 2, marginBottom: 10 },
+  nomeCredito: { fontSize: 16, marginBottom: 2, letterSpacing: 0.5 },
+  versaoCreditosMenor: { fontSize: 11, marginBottom: 5 },
+  versaoDireitos: { fontSize: 10, fontStyle: 'italic' },
 });

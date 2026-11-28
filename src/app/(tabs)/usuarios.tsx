@@ -7,6 +7,7 @@ import { db } from '../../config/firebase';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
 import { FeedbackToast, type EstadoFeedback, type TipoFeedback } from '../../components/FeedbackToast';
 
+// === TIPOS E CONSTANTES ===
 type PerfilUsuario = 'Administrador' | 'Coordenador' | 'Professor';
 type FiltroPerfil = 'Todos' | PerfilUsuario;
 type SituacaoUsuario = 'Ativo' | 'Inativo';
@@ -47,6 +48,7 @@ const FILTROS_DIA = [
 ];
 const FILTROS_TURNO = ['Todos', 'Matutino', 'Vespertino', 'Noturno'] as const;
 
+// === HELPERS ===
 const normalizarPerfil = (raw: unknown): PerfilUsuario => {
   const valor = String(raw || '').toLowerCase();
   if (valor.includes('admin')) return 'Administrador';
@@ -67,6 +69,7 @@ export default function UsuariosScreen() {
   const isAdmin = perfil === 'admin';
   const isCoord = perfil === 'coordenador';
 
+  // === ESTADOS ===
   const [usuarios, setUsuarios] = useState<UsuarioItem[]>([]);
   const [gradeAulas, setGradeAulas] = useState<AulaGradeItem[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -81,7 +84,6 @@ export default function UsuariosScreen() {
   const [aulaExcluindoId, setAulaExcluindoId] = useState<string | null>(null);
   const [modalNovoProf, setModalNovoProf] = useState(false);
   const [formNovoProf, setFormNovoProf] = useState({ nome: '', email: '', cpf: '', disciplina: '' });
-
   const [selecionado, setSelecionado] = useState<UsuarioItem | null>(null);
   const [editando, setEditando] = useState(false);
   const [etapaExclusao, setEtapaExclusao] = useState<0 | 1>(0);
@@ -95,7 +97,9 @@ export default function UsuariosScreen() {
     setFeedback({ visivel: true, tipo, titulo, mensagem });
   }, []);
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
+  const voltar = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
 
+  // === CARREGAMENTO DE DADOS (FIRESTORE) ===
   const buscarUsuarios = useCallback(async () => {
     setCarregando(true);
     try {
@@ -121,26 +125,22 @@ export default function UsuariosScreen() {
           const aulasBanco: AulaGradeItem[] = gradeSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
           aulasBanco.sort((a, b) => (a.diaId || 0) - (b.diaId || 0) || String(a.horario || '').localeCompare(String(b.horario || '')));
           setGradeAulas(aulasBanco);
-        } catch { setGradeAulas([]); }
+        } catch {
+          setGradeAulas([]);
+        }
       }
     } catch (error: any) {
       notificar('erro', 'Erro ao carregar usuários', error?.message || 'Falha ao consultar a coleção usuarios.');
-    } finally { setCarregando(false); }
+    } finally {
+      setCarregando(false);
+    }
   }, [isCoord, notificar]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void buscarUsuarios();
-    }, [buscarUsuarios])
-  );
+  useFocusEffect(useCallback(() => { void buscarUsuarios(); }, [buscarUsuarios]));
 
+  // === CONTROLE DE MODAIS E PASTAS ===
   const sincronizarFormEdicao = (u: UsuarioItem) => {
-    setFormEdicao({
-      nome: u.nome,
-      email: u.email,
-      perfil: u.perfil === 'Coordenador' ? 'Coordenador' : 'Professor',
-      disciplina: u.disciplina || '',
-    });
+    setFormEdicao({ nome: u.nome, email: u.email, perfil: u.perfil === 'Coordenador' ? 'Coordenador' : 'Professor', disciplina: u.disciplina || '' });
   };
 
   const abrirModal = (usuario: UsuarioItem) => {
@@ -174,11 +174,9 @@ export default function UsuariosScreen() {
     });
   }, [gradeAulas, diaFiltroCoord, turnoFiltroCoord]);
 
+  // === AÇÕES FIRESTORE ===
   const excluirAulaGrade = async (aula: AulaGradeItem) => {
-    if (aulaExcluindoId !== aula.id) {
-      setAulaExcluindoId(aula.id);
-      return;
-    }
+    if (aulaExcluindoId !== aula.id) return setAulaExcluindoId(aula.id);
     setOcupado(true);
     try {
       await deleteDoc(doc(db, 'grade_aulas', aula.id));
@@ -187,7 +185,9 @@ export default function UsuariosScreen() {
       notificar('sucesso', 'Aula removida', `${aula.nome || 'Turma'} • ${aula.horario || ''} removida da grade.`);
     } catch (error: any) {
       notificar('erro', 'Erro ao remover aula', error?.message || 'Não foi possível excluir a aula da grade.');
-    } finally { setOcupado(false); }
+    } finally {
+      setOcupado(false);
+    }
   };
 
   const salvarNovoProfessorCoord = async () => {
@@ -195,9 +195,7 @@ export default function UsuariosScreen() {
     if (!nome.trim() || !email.trim() || cpf.replace(/\D/g, '').length < 11) {
       return notificar('aviso', 'Campos obrigatórios', 'Preencha nome completo, e-mail válido e CPF (11 dígitos).');
     }
-    if (!disciplina.trim()) {
-      return notificar('aviso', 'Disciplina obrigatória', 'Informe a matéria ministrada pelo professor.');
-    }
+    if (!disciplina.trim()) return notificar('aviso', 'Disciplina obrigatória', 'Informe a matéria ministrada pelo professor.');
     const senhaGerada = gerarSenhaPadrao(nome, cpf);
     setOcupado(true);
     try {
@@ -220,34 +218,15 @@ export default function UsuariosScreen() {
       notificar('sucesso', 'Professor cadastrado!', `${nome.trim()} (${disciplina.trim()}) • Senha inicial: ${senhaGerada}`);
     } catch (error: any) {
       notificar('erro', 'Erro ao cadastrar', error?.message || 'Não foi possível salvar o professor no Firestore.');
-    } finally { setOcupado(false); }
+    } finally {
+      setOcupado(false);
+    }
   };
 
   const atualizarUsuarioLocal = (atualizado: UsuarioItem) => {
     setUsuarios(prev => prev.map(u => (u.id === atualizado.id ? atualizado : u)));
     setSelecionado(prev => (prev?.id === atualizado.id ? atualizado : prev));
   };
-
-  const usuariosFiltrados = useMemo(() => {
-    const termo = busca.trim().toLocaleLowerCase('pt-BR');
-    return usuarios.filter(u => {
-      const bateTexto = u.nome.toLocaleLowerCase('pt-BR').includes(termo) ||
-        (isCoord && String(u.disciplina || '').toLocaleLowerCase('pt-BR').includes(termo));
-      const batePerfil = isCoord ? u.perfil === 'Professor' : perfilFiltro === 'Todos' || u.perfil === perfilFiltro;
-      const bateSituacao = situacaoFiltro === 'Todas' || u.situacao === situacaoFiltro;
-      return bateTexto && batePerfil && bateSituacao;
-    });
-  }, [busca, isCoord, perfilFiltro, situacaoFiltro, usuarios]);
-
-  const temFiltroAtivoCoord = situacaoFiltro !== 'Todas' || diaFiltroCoord !== 0 || turnoFiltroCoord !== 'Todos';
-
-  const limparFiltrosCoord = () => {
-    setSituacaoFiltro('Todas');
-    setDiaFiltroCoord(0);
-    setTurnoFiltroCoord('Todos');
-  };
-
-  const voltar = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
 
   const bloquearAdmin = (u: UsuarioItem) => {
     if (u.perfil !== 'Administrador') return false;
@@ -265,7 +244,9 @@ export default function UsuariosScreen() {
       notificar('sucesso', 'Situação atualizada', `${usuario.nome} agora está ${novaSituacao}.`);
     } catch (error: any) {
       notificar('erro', 'Erro ao atualizar', error?.message || 'Não foi possível alterar a situação do usuário.');
-    } finally { setOcupado(false); }
+    } finally {
+      setOcupado(false);
+    }
   };
 
   const salvarEdicao = async () => {
@@ -289,7 +270,9 @@ export default function UsuariosScreen() {
       notificar('sucesso', 'Dados salvos', `As informações de ${nomeLimpo} foram atualizadas.`);
     } catch (error: any) {
       notificar('erro', 'Erro ao salvar', error?.message || 'Não foi possível salvar as alterações no Firestore.');
-    } finally { setOcupado(false); }
+    } finally {
+      setOcupado(false);
+    }
   };
 
   const redefinirSenha = async (usuario: UsuarioItem) => {
@@ -302,7 +285,9 @@ export default function UsuariosScreen() {
       notificar('sucesso', 'Senha redefinida', `Senha inicial de ${usuario.nome}: ${senha}`);
     } catch (error: any) {
       notificar('erro', 'Erro ao redefinir', error?.message || 'Não foi possível atualizar a senha inicial.');
-    } finally { setOcupado(false); }
+    } finally {
+      setOcupado(false);
+    }
   };
 
   const excluirUsuario = async (usuario: UsuarioItem) => {
@@ -316,62 +301,63 @@ export default function UsuariosScreen() {
       notificar('sucesso', 'Usuário excluído', `${usuario.nome} foi removido da gestão de usuários.`);
     } catch (error: any) {
       notificar('erro', 'Erro ao excluir', error?.message || 'Não foi possível excluir o usuário.');
-    } finally { setOcupado(false); }
+    } finally {
+      setOcupado(false);
+    }
   };
 
-  const toastProps = {
-    feedback,
-    onFechar: fecharFeedback,
-    fundoCard: tema.fundoTopo,
-    textoPrincipal: tema.textoPrincipal,
-    textoSecundario: tema.textoSecundario,
-  };
+  // === FILTROS ===
+  const usuariosFiltrados = useMemo(() => {
+    const termo = busca.trim().toLocaleLowerCase('pt-BR');
+    return usuarios.filter(u => {
+      const bateTexto = u.nome.toLocaleLowerCase('pt-BR').includes(termo) ||
+        (isCoord && String(u.disciplina || '').toLocaleLowerCase('pt-BR').includes(termo));
+      const batePerfil = isCoord ? u.perfil === 'Professor' : perfilFiltro === 'Todos' || u.perfil === perfilFiltro;
+      const bateSituacao = situacaoFiltro === 'Todas' || u.situacao === situacaoFiltro;
+      return bateTexto && batePerfil && bateSituacao;
+    });
+  }, [busca, isCoord, perfilFiltro, situacaoFiltro, usuarios]);
 
-  const renderUsuario = ({ item }: { item: UsuarioItem }) => (
-    <TouchableOpacity
-      style={[styles.cardUsuario, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}
-      onPress={() => abrirModal(item)}
-      activeOpacity={0.75}
-      accessibilityRole="button"
-      accessibilityLabel={`Ver dados de ${item.nome}`}
-    >
-      <View style={[styles.iconeUsuario, { backgroundColor: tema.botaoPrimario + '20' }]}>
-        <Ionicons name="person" size={21} color={tema.botaoPrimario} />
-      </View>
-      <View style={styles.infoUsuario}>
-        <Text style={[styles.nomeUsuario, { color: tema.textoPrincipal }]}>{item.nome}</Text>
-        <Text style={[styles.perfilUsuario, { color: tema.textoSecundario }]}>
-          {item.perfil}{item.perfil === 'Professor' && item.disciplina ? ` • ${item.disciplina}` : ''}
-        </Text>
-      </View>
-      <View style={[styles.badgeSituacao, { backgroundColor: item.situacao === 'Ativo' ? '#E8F5E9' : '#FFEBEE' }]}>
-        <Text style={[styles.textoSituacao, { color: item.situacao === 'Ativo' ? '#2E7D32' : '#C62828' }]}>{item.situacao}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={tema.icone} style={{ marginLeft: 8 }} />
-    </TouchableOpacity>
-  );
+  const temFiltroAtivoCoord = situacaoFiltro !== 'Todas' || diaFiltroCoord !== 0 || turnoFiltroCoord !== 'Todos';
+  const limparFiltrosCoord = () => { setSituacaoFiltro('Todas'); setDiaFiltroCoord(0); setTurnoFiltroCoord('Todos'); };
+  const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
+
+  // === RENDERIZADORES ===
+  const renderUsuario = ({ item }: { item: UsuarioItem }) => {
+    const corSit = item.situacao === 'Ativo' ? '#2E7D32' : '#C62828';
+    return (
+      <TouchableOpacity style={[styles.cardUsuario, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]} onPress={() => abrirModal(item)} activeOpacity={0.75} accessibilityRole="button" accessibilityLabel={`Ver dados de ${item.nome}`}>
+        <View style={[styles.iconeUsuario, { backgroundColor: tema.botaoPrimario + '20' }]}>
+          <Ionicons name="person" size={21} color={tema.botaoPrimario} />
+        </View>
+        <View style={styles.infoUsuario}>
+          <Text style={[styles.nomeUsuario, { color: tema.textoPrincipal }]}>{item.nome}</Text>
+          <Text style={[styles.perfilUsuario, { color: tema.textoSecundario }]}>{item.perfil}{item.perfil === 'Professor' && item.disciplina ? ` • ${item.disciplina}` : ''}</Text>
+        </View>
+        <View style={[styles.badgeSituacao, { backgroundColor: corSit + '20' }]}>
+          <Text style={[styles.textoSituacao, { color: corSit }]}>{item.situacao}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={tema.icone} style={{ marginLeft: 8 }} />
+      </TouchableOpacity>
+    );
+  };
 
   const renderPastaProfessorCoord = ({ item }: { item: UsuarioItem }) => {
     const aberta = pastasExpandidas.includes(item.id);
     const aulas = obterAulasDoProfessor(item);
+    const corSit = item.situacao === 'Ativo' ? '#2E7D32' : '#C62828';
     return (
       <View style={{ marginBottom: 12 }}>
-        <TouchableOpacity
-          style={[styles.cardUsuario, { marginBottom: 0, backgroundColor: tema.inputBackground, borderColor: aberta ? tema.botaoPrimario : tema.borda }]}
-          onPress={() => togglePastaProfessor(item.id)}
-          activeOpacity={0.75}
-        >
+        <TouchableOpacity style={[styles.cardUsuario, { marginBottom: 0, backgroundColor: tema.inputBackground, borderColor: aberta ? tema.botaoPrimario : tema.borda }]} onPress={() => togglePastaProfessor(item.id)} activeOpacity={0.75}>
           <View style={[styles.iconeUsuario, { backgroundColor: tema.botaoPrimario + '20' }]}>
             <Ionicons name={aberta ? 'folder-open' : 'folder'} size={20} color={tema.botaoPrimario} />
           </View>
           <View style={styles.infoUsuario}>
             <Text style={[styles.nomeUsuario, { color: tema.textoPrincipal }]}>{item.nome}</Text>
-            <Text style={[styles.perfilUsuario, { color: tema.textoSecundario }]}>
-              {item.disciplina || 'Sem disciplina'} • {aulas.length} {aulas.length === 1 ? 'aula' : 'aulas'}
-            </Text>
+            <Text style={[styles.perfilUsuario, { color: tema.textoSecundario }]}>{item.disciplina || 'Sem disciplina'} • {aulas.length} {aulas.length === 1 ? 'aula' : 'aulas'}</Text>
           </View>
-          <View style={[styles.badgeSituacao, { backgroundColor: item.situacao === 'Ativo' ? '#E8F5E9' : '#FFEBEE', marginRight: 6 }]}>
-            <Text style={[styles.textoSituacao, { color: item.situacao === 'Ativo' ? '#2E7D32' : '#C62828' }]}>{item.situacao}</Text>
+          <View style={[styles.badgeSituacao, { backgroundColor: corSit + '20', marginRight: 6 }]}>
+            <Text style={[styles.textoSituacao, { color: corSit }]}>{item.situacao}</Text>
           </View>
           <TouchableOpacity onPress={() => abrirModal(item)} style={{ padding: 4, marginRight: 4 }} accessibilityLabel="Ver dados do professor">
             <Ionicons name="information-circle-outline" size={20} color={tema.textoSecundario} />
@@ -389,25 +375,16 @@ export default function UsuariosScreen() {
               return (
                 <View key={aula.id} style={[styles.cardAulaProf, { backgroundColor: tema.inputBackground, borderColor: confirmando ? '#C62828' : tema.borda }]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 14 }}>
-                      {aula.nome || 'Turma'} • {aula.disciplina || item.disciplina || 'Matéria'}
-                    </Text>
+                    <Text style={{ color: tema.textoPrincipal, fontWeight: '700', fontSize: 14 }}>{aula.nome || 'Turma'} • {aula.disciplina || item.disciplina || 'Matéria'}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
                       <Ionicons name="calendar-outline" size={13} color={tema.botaoPrimario} />
-                      <Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: '700' }}>
-                        {DIAS_SEMANA[aula.diaId || 1] || 'Dia'} • {aula.horario || 'Horário não definido'}
-                      </Text>
+                      <Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: '700' }}>{DIAS_SEMANA[aula.diaId || 1] || 'Dia'} • {aula.horario || 'Horário não definido'}</Text>
                     </View>
                   </View>
                   <View style={[styles.pillTurnoAula, { backgroundColor: tema.botaoPrimario + '18' }]}>
                     <Text style={{ color: tema.botaoPrimario, fontSize: 10, fontWeight: '700' }}>{aula.turno || 'Matutino'}</Text>
                   </View>
-                  <TouchableOpacity
-                    onPress={() => void excluirAulaGrade(aula)}
-                    disabled={ocupado}
-                    style={{ padding: 6, borderRadius: 8, backgroundColor: confirmando ? '#C6282820' : 'transparent' }}
-                    accessibilityLabel="Excluir aula da grade"
-                  >
+                  <TouchableOpacity onPress={() => void excluirAulaGrade(aula)} disabled={ocupado} style={{ padding: 6, borderRadius: 8, backgroundColor: confirmando ? '#C6282820' : 'transparent' }} accessibilityLabel="Excluir aula da grade">
                     <Ionicons name={confirmando ? 'checkmark-circle' : 'trash-outline'} size={18} color="#C62828" />
                   </TouchableOpacity>
                 </View>
@@ -432,42 +409,16 @@ export default function UsuariosScreen() {
   }
 
   const acoesAdmin = selecionado ? [
-    {
-      key: 'status',
-      icone: selecionado.situacao === 'Ativo' ? ('pause-circle-outline' as const) : ('play-circle-outline' as const),
-      cor: selecionado.situacao === 'Ativo' ? '#EF6C00' : '#2E7D32',
-      label: selecionado.situacao === 'Ativo' ? 'Inativar usuário' : 'Ativar usuário',
-      onPress: () => void alternarSituacao(selecionado),
-      destaqueExclusao: false,
-    },
-    {
-      key: 'editar',
-      icone: 'create-outline' as const,
-      cor: tema.botaoPrimario,
-      label: 'Editar dados e cargo',
-      onPress: () => { setEtapaExclusao(0); setEditando(true); },
-      destaqueExclusao: false,
-    },
-    {
-      key: 'senha',
-      icone: 'key-outline' as const,
-      cor: tema.botaoPrimario,
-      label: 'Redefinir senha inicial',
-      onPress: () => void redefinirSenha(selecionado),
-      destaqueExclusao: false,
-    },
-    {
-      key: 'excluir',
-      icone: 'trash-outline' as const,
-      cor: '#C62828',
-      label: etapaExclusao === 1 ? 'Confirmar exclusão definitiva' : 'Excluir usuário',
-      onPress: () => void excluirUsuario(selecionado),
-      destaqueExclusao: etapaExclusao === 1,
-    },
+    { key: 'status', icone: selecionado.situacao === 'Ativo' ? ('pause-circle-outline' as const) : ('play-circle-outline' as const), cor: selecionado.situacao === 'Ativo' ? '#EF6C00' : '#2E7D32', label: selecionado.situacao === 'Ativo' ? 'Inativar usuário' : 'Ativar usuário', onPress: () => void alternarSituacao(selecionado), destaqueExclusao: false },
+    { key: 'editar', icone: 'create-outline' as const, cor: tema.botaoPrimario, label: 'Editar dados e cargo', onPress: () => { setEtapaExclusao(0); setEditando(true); }, destaqueExclusao: false },
+    { key: 'senha', icone: 'key-outline' as const, cor: tema.botaoPrimario, label: 'Redefinir senha inicial', onPress: () => void redefinirSenha(selecionado), destaqueExclusao: false },
+    { key: 'excluir', icone: 'trash-outline' as const, cor: '#C62828', label: etapaExclusao === 1 ? 'Confirmar exclusão definitiva' : 'Excluir usuário', onPress: () => void excluirUsuario(selecionado), destaqueExclusao: etapaExclusao === 1 },
   ] : [];
 
+  // === INTERFACE ===
   return (
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: tema.fundoBase }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {/* Cabeçalho */}
       <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
         <View style={styles.headerLinha}>
           <TouchableOpacity onPress={voltar} style={styles.botaoVoltarHeader} accessibilityRole="button" accessibilityLabel="Voltar">
@@ -488,65 +439,56 @@ export default function UsuariosScreen() {
         </View>
       </View>
 
+      {/* Busca e Filtros */}
       <View style={styles.filtros}>
         <View style={styles.rowBuscaFiltro}>
           <View style={[styles.buscaContainer, { flex: 1, backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
             <Ionicons name="search" size={20} color={tema.textoSecundario} style={{ marginRight: 8 }} />
-            <TextInput
-              style={[styles.inputBusca, { color: tema.textoPrincipal }]}
-              placeholder={isCoord ? 'Pesquisar professor ou matéria...' : 'Pesquisar por nome'}
-              placeholderTextColor={tema.textoSecundario}
-              value={busca}
-              onChangeText={setBusca}
-              accessibilityLabel="Pesquisar usuários por nome"
-            />
+            <TextInput style={[styles.inputBusca, { color: tema.textoPrincipal }]} placeholder={isCoord ? 'Pesquisar professor ou matéria...' : 'Pesquisar por nome'} placeholderTextColor={tema.textoSecundario} value={busca} onChangeText={setBusca} accessibilityLabel="Pesquisar usuários por nome" />
           </View>
           {isCoord && (
-            <TouchableOpacity
-              style={[styles.btnFiltroHeader, { backgroundColor: temFiltroAtivoCoord ? tema.botaoPrimario : tema.inputBackground, borderColor: temFiltroAtivoCoord ? tema.botaoPrimario : tema.borda }]}
-              onPress={() => setModalFiltroCoord(true)}
-              accessibilityLabel="Filtrar professores e horários"
-            >
+            <TouchableOpacity style={[styles.btnFiltroHeader, { backgroundColor: temFiltroAtivoCoord ? tema.botaoPrimario : tema.inputBackground, borderColor: temFiltroAtivoCoord ? tema.botaoPrimario : tema.borda }]} onPress={() => setModalFiltroCoord(true)} accessibilityLabel="Filtrar professores e horários">
               <Ionicons name="options-outline" size={20} color={temFiltroAtivoCoord ? tema.textoBotao : tema.textoPrincipal} />
             </TouchableOpacity>
           )}
         </View>
-
         {isCoord && temFiltroAtivoCoord && (
           <View style={styles.barraFiltroAtivo}>
             <Text style={{ color: tema.textoSecundario, fontSize: 12 }}>
-              Filtro: <Text style={{ color: tema.textoPrincipal, fontWeight: '700' }}>
-                {situacaoFiltro} • {diaFiltroCoord === 0 ? 'Todos os dias' : DIAS_SEMANA[diaFiltroCoord]} • {turnoFiltroCoord}
-              </Text>
+              Filtro: <Text style={{ color: tema.textoPrincipal, fontWeight: '700' }}>{situacaoFiltro} • {diaFiltroCoord === 0 ? 'Todos os dias' : DIAS_SEMANA[diaFiltroCoord]} • {turnoFiltroCoord}</Text>
             </Text>
-            <TouchableOpacity onPress={limparFiltrosCoord}>
-              <Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: 'bold' }}>Limpar</Text>
-            </TouchableOpacity>
+            <TouchableOpacity onPress={limparFiltrosCoord}><Text style={{ color: tema.botaoPrimario, fontSize: 12, fontWeight: 'bold' }}>Limpar</Text></TouchableOpacity>
           </View>
         )}
-
         {isAdmin && (
           <>
             <Text style={[styles.rotuloFiltro, { color: tema.textoSecundario }]}>Perfil</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.listaFiltros}>
-              {FILTROS_PERFIL.map(filtro => (
-                <TouchableOpacity key={filtro} style={[styles.chipFiltro, { backgroundColor: perfilFiltro === filtro ? tema.botaoPrimario : tema.inputBackground, borderColor: tema.borda }]} onPress={() => setPerfilFiltro(filtro)} accessibilityRole="button" accessibilityState={{ selected: perfilFiltro === filtro }}>
-                  <Text style={[styles.textoChip, { color: perfilFiltro === filtro ? tema.textoBotao : tema.textoPrincipal }]}>{filtro}</Text>
-                </TouchableOpacity>
-              ))}
+              {FILTROS_PERFIL.map(filtro => {
+                const ativo = perfilFiltro === filtro;
+                return (
+                  <TouchableOpacity key={filtro} style={[styles.chipFiltro, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: ativo ? tema.botaoPrimario : tema.borda }]} onPress={() => setPerfilFiltro(filtro)} accessibilityRole="button" accessibilityState={{ selected: ativo }}>
+                    <Text style={[styles.textoChip, { color: ativo ? tema.textoBotao : tema.textoPrincipal }]}>{filtro}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
             <Text style={[styles.rotuloFiltro, { color: tema.textoSecundario }]}>Situação</Text>
             <View style={styles.listaFiltros}>
-              {FILTROS_SITUACAO.map(filtro => (
-                <TouchableOpacity key={filtro} style={[styles.chipFiltro, { backgroundColor: situacaoFiltro === filtro ? tema.botaoPrimario : tema.inputBackground, borderColor: tema.borda }]} onPress={() => setSituacaoFiltro(filtro)} accessibilityRole="button" accessibilityState={{ selected: situacaoFiltro === filtro }}>
-                  <Text style={[styles.textoChip, { color: situacaoFiltro === filtro ? tema.textoBotao : tema.textoPrincipal }]}>{filtro}</Text>
-                </TouchableOpacity>
-              ))}
+              {FILTROS_SITUACAO.map(filtro => {
+                const ativo = situacaoFiltro === filtro;
+                return (
+                  <TouchableOpacity key={filtro} style={[styles.chipFiltro, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: ativo ? tema.botaoPrimario : tema.borda }]} onPress={() => setSituacaoFiltro(filtro)} accessibilityRole="button" accessibilityState={{ selected: ativo }}>
+                    <Text style={[styles.textoChip, { color: ativo ? tema.textoBotao : tema.textoPrincipal }]}>{filtro}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </>
         )}
       </View>
 
+      {/* Lista Principal */}
       <FlatList
         data={usuariosFiltrados}
         keyExtractor={item => item.id}
@@ -561,6 +503,7 @@ export default function UsuariosScreen() {
         }
       />
 
+      {/* Modal: Filtros da Coordenação */}
       <Modal visible={modalFiltroCoord} transparent animationType="slide" onRequestClose={() => setModalFiltroCoord(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -615,6 +558,7 @@ export default function UsuariosScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Cadastrar Professor (Coordenação) */}
       <Modal visible={modalNovoProf} transparent animationType="slide" onRequestClose={() => setModalNovoProf(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -648,6 +592,7 @@ export default function UsuariosScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Detalhes e Edição de Usuário */}
       <Modal visible={selecionado !== null} transparent animationType="slide" onRequestClose={fecharModal}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -729,9 +674,7 @@ export default function UsuariosScreen() {
                         ))}
                       </View>
                     )}
-                    <Text style={[styles.avisoDemonstrativo, { color: tema.textoSecundario }]}>
-                      Alterações sincronizadas diretamente com a coleção de usuários.
-                    </Text>
+                    <Text style={[styles.avisoDemonstrativo, { color: tema.textoSecundario }]}>Alterações sincronizadas diretamente com a coleção de usuários.</Text>
                   </>
                 )}
               </ScrollView>
@@ -746,6 +689,7 @@ export default function UsuariosScreen() {
   );
 }
 
+// === ESTILOS ===
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, elevation: 5 },

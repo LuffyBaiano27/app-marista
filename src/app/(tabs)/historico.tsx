@@ -6,6 +6,7 @@ import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
 import { db } from '../../config/firebase';
 
+// === CONSTANTES E FALLBACKS ===
 const ID_PROFESSOR_DEMONSTRATIVO = 'prof_1';
 const LOGS_SISTEMA_FALLBACK = [
   { id: 'log_1', tipo: 'usuario', titulo: 'Usuário Cadastrado', detalhe: 'Rafael Nunes (Professor) vinculado à base por Marina Andrade', dataFormatada: 'Ontem, 14:15' },
@@ -15,6 +16,7 @@ const CHAMADOS_ENCERRADOS_FALLBACK = [
   { id: 'ch_1', titulo: 'Erro ao sincronizar turma 6º Ano A', detalhe: 'Resolvido por Marina Andrade', dataFormatada: 'Hoje, 18:40' },
 ];
 
+// === HELPERS ===
 const formatarData = (dataInput: any) => {
   if (!dataInput) return 'Recente';
   const dataObjeto = dataInput?.toDate ? dataInput.toDate() : new Date(dataInput);
@@ -31,8 +33,7 @@ const formatarData = (dataInput: any) => {
 const formatarDataBrCurta = (dataInput: any) => {
   if (!dataInput) return '';
   const dataObjeto = dataInput?.toDate ? dataInput.toDate() : new Date(dataInput);
-  if (isNaN(dataObjeto.getTime())) return '';
-  return dataObjeto.toLocaleDateString('pt-BR');
+  return isNaN(dataObjeto.getTime()) ? '' : dataObjeto.toLocaleDateString('pt-BR');
 };
 
 const formatarInputDataFiltro = (valor: string) => {
@@ -56,12 +57,12 @@ export default function HistoricoScreen() {
   const isAdmin = perfil === 'admin';
   const isProf = perfil === 'professor';
 
+  // === ESTADOS ===
   const [abaAtiva, setAbaAtiva] = useState<string>(isAdmin ? 'auditoria' : 'frequencia');
   const [busca, setBusca] = useState('');
   const [filtroData, setFiltroData] = useState('');
   const [filtroAula, setFiltroAula] = useState('');
   const [dropdownAulaAberto, setDropdownAulaAberto] = useState(false);
-
   const [historicoChamadas, setHistoricoChamadas] = useState<any[]>([]);
   const [boletinsReais, setBoletinsReais] = useState<any[]>([]);
   const [logsSistema, setLogsSistema] = useState<any[]>([]);
@@ -78,6 +79,7 @@ export default function HistoricoScreen() {
     setDropdownAulaAberto(false);
   }, [isAdmin, aba]);
 
+  // === CARREGAMENTO DE DADOS (FIRESTORE) ===
   const buscarDados = useCallback(async () => {
     setCarregando(true);
     try {
@@ -96,7 +98,9 @@ export default function HistoricoScreen() {
         dicTurmas[docSnap.id] = String(turma.nome || 'Turma');
         if (turma.criadoPor) {
           logsMontados.push({
-            id: `turma_${docSnap.id}`, tipo: 'turma', titulo: 'Turma Cadastrada',
+            id: `turma_${docSnap.id}`,
+            tipo: 'turma',
+            titulo: 'Turma Cadastrada',
             detalhe: `${turma.nome} (${turma.turno || 'Turno regular'}) criada por ${turma.criadoPor}`,
             dataFormatada: formatarData(turma.criadoEm),
           });
@@ -121,7 +125,9 @@ export default function HistoricoScreen() {
             const u = docSnap.data();
             if (u.criadoPor) {
               logsMontados.push({
-                id: `user_${docSnap.id}`, tipo: 'usuario', titulo: 'Usuário Cadastrado',
+                id: `user_${docSnap.id}`,
+                tipo: 'usuario',
+                titulo: 'Usuário Cadastrado',
                 detalhe: `${u.nome} (${u.role || 'usuário'}) cadastrado por ${u.criadoPor}`,
                 dataFormatada: formatarData(u.criadoEm),
               });
@@ -166,9 +172,7 @@ export default function HistoricoScreen() {
           if (isProf && idsTurmasProf.size > 0 && !ehDoProf) return;
 
           const alunosLista = Array.isArray(dados.alunos) ? dados.alunos : [];
-          let presentes = 0;
-          let faltas = 0;
-          let justificadas = 0;
+          let presentes = 0, faltas = 0, justificadas = 0;
           alunosLista.forEach((a: any) => {
             if (a.status === 'falta') faltas++;
             else if (a.status === 'justificada') justificadas++;
@@ -178,14 +182,13 @@ export default function HistoricoScreen() {
           });
 
           const dataBr = formatarDataBrCurta(dados.dataChamada) || String(dados.dataChamadaFormatada || '');
-          const rotuloAula = `${turmaNome} • ${String(dados.disciplina || 'Disciplina')}`;
-
+          const disciplina = String(dados.disciplina || 'Disciplina');
           registrosMontados.push({
             id: docSnap.id,
             turmaId: String(dados.turmaId || ''),
             turmaNome,
-            disciplina: String(dados.disciplina || 'Disciplina'),
-            rotuloAula,
+            disciplina,
+            rotuloAula: `${turmaNome} • ${disciplina}`,
             professorNome: String(dados.professorNome || ''),
             horario: String(dados.horario || ''),
             conteudoMinistrado: String(dados.conteudoMinistrado || ''),
@@ -205,7 +208,6 @@ export default function HistoricoScreen() {
           const n = docSnap.data() as any;
           const notaStr = String(n.nota ?? '').trim().replace(',', '.');
           if (notaStr === '' || Number.isNaN(Number(notaStr))) return;
-
           const turma = String(n.turma || 'Sem turma');
           const disciplina = String(n.materia || 'Disciplina');
           const aluno = String(n.alunoNome || 'Aluno');
@@ -218,8 +220,7 @@ export default function HistoricoScreen() {
           });
           mapaBoletim.set(chave, atual);
         });
-        const listaBoletins = Array.from(mapaBoletim.values()).sort((a, b) => a.aluno.localeCompare(b.aluno, 'pt-BR'));
-        setBoletinsReais(listaBoletins);
+        setBoletinsReais(Array.from(mapaBoletim.values()).sort((a, b) => a.aluno.localeCompare(b.aluno, 'pt-BR')));
       }
     } catch (error) {
       console.error('Erro ao buscar histórico:', error);
@@ -228,12 +229,9 @@ export default function HistoricoScreen() {
     }
   }, [isAdmin, isProf]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void buscarDados();
-    }, [buscarDados])
-  );
+  useFocusEffect(useCallback(() => { void buscarDados(); }, [buscarDados]));
 
+  // === FILTROS E KPIS ===
   const voltarTela = () => (router.canGoBack() ? router.back() : router.push('/(tabs)'));
   const isBuscando = busca.trim().length > 0 || filtroData.trim().length > 0 || filtroAula.trim().length > 0;
   const termo = busca.toLowerCase();
@@ -250,32 +248,21 @@ export default function HistoricoScreen() {
   const chamadasFiltradas = useMemo(() => {
     const dataBuscaLimpa = filtroData.trim();
     const aulaBuscaLimpa = filtroAula.trim().toLowerCase();
-
     return historicoChamadas.filter(i => {
       if (dataBuscaLimpa) {
-        const bateBr = String(i.dataBr || '').includes(dataBuscaLimpa);
-        const bateFmt = String(i.dataFormatada || '').toLowerCase().includes(dataBuscaLimpa.toLowerCase());
-        const bateIso = String(i.dataChamadaFormatada || '').includes(dataBuscaLimpa);
-        if (!bateBr && !bateFmt && !bateIso) return false;
+        const bate = [i.dataBr, i.dataFormatada, i.dataChamadaFormatada].some(v => String(v || '').toLowerCase().includes(dataBuscaLimpa.toLowerCase()));
+        if (!bate) return false;
       }
       if (aulaBuscaLimpa) {
-        const bateAula = String(i.rotuloAula || '').toLowerCase().includes(aulaBuscaLimpa) ||
-          String(i.turmaNome || '').toLowerCase().includes(aulaBuscaLimpa) ||
-          String(i.disciplina || '').toLowerCase().includes(aulaBuscaLimpa);
+        const bateAula = [i.rotuloAula, i.turmaNome, i.disciplina].some(v => String(v || '').toLowerCase().includes(aulaBuscaLimpa));
         if (!bateAula) return false;
       }
-      if (!termo) return true;
-      return (
-        i.turmaNome.toLowerCase().includes(termo) ||
-        i.disciplina.toLowerCase().includes(termo) ||
-        i.dataFormatada.toLowerCase().includes(termo) ||
-        i.conteudoMinistrado.toLowerCase().includes(termo)
-      );
+      return !termo || [i.turmaNome, i.disciplina, i.dataFormatada, i.conteudoMinistrado].some(v => String(v || '').toLowerCase().includes(termo));
     });
   }, [historicoChamadas, filtroData, filtroAula, termo]);
 
   const boletinsFiltrados = useMemo(
-    () => boletinsReais.filter(b => b.aluno.toLowerCase().includes(termo) || b.turma.toLowerCase().includes(termo) || b.disciplina.toLowerCase().includes(termo)),
+    () => boletinsReais.filter(b => [b.aluno, b.turma, b.disciplina].some(v => v.toLowerCase().includes(termo))),
     [boletinsReais, termo]
   );
 
@@ -288,12 +275,12 @@ export default function HistoricoScreen() {
     const totalAulas = chamadasFiltradas.length;
     const totalPres = chamadasFiltradas.reduce((acc, c) => acc + c.presentes + c.justificadas, 0);
     const totalReg = chamadasFiltradas.reduce((acc, c) => acc + c.presentes + c.faltas + c.justificadas, 0);
-    const freq = totalReg > 0 ? `${Math.round((totalPres / totalReg) * 100)}%` : '—';
-    return { totalAulas, freq };
+    return { totalAulas, freq: totalReg > 0 ? `${Math.round((totalPres / totalReg) * 100)}%` : '—' };
   }, [chamadasFiltradas]);
 
   const toggleTurma = (nome: string) => setTurmasExpandidas(prev => (prev.includes(nome) ? prev.filter(t => t !== nome) : [...prev, nome]));
 
+  // === RENDERIZADORES ===
   const renderCabecalhoCard = (icone: keyof typeof Ionicons.glyphMap, cor: string, titulo: string, data: string) => (
     <View style={[styles.linhaCabecalho, { marginBottom: 8 }]}>
       <View style={[styles.linhaTitulo, { flex: 1, marginRight: 8 }]}>
@@ -324,30 +311,16 @@ export default function HistoricoScreen() {
   );
 
   const renderChamada = ({ item }: { item: any }) => (
-    <TouchableOpacity
-      style={[styles.cardItem, { backgroundColor: tema.inputBackground, borderColor: tema.borda, marginBottom: 12 }]}
-      activeOpacity={0.75}
-      onPress={() => setDiarioSelecionado(item)}
-    >
+    <TouchableOpacity style={[styles.cardItem, { backgroundColor: tema.inputBackground, borderColor: tema.borda, marginBottom: 12 }]} activeOpacity={0.75} onPress={() => setDiarioSelecionado(item)}>
       {renderCabecalhoCard('checkmark-circle-outline', '#2E7D32', item.rotuloAula, item.dataFormatada)}
       <View style={styles.corpoCard}>
         {!!item.conteudoMinistrado && (
-          <Text style={[styles.textoDetalhe, { color: tema.textoPrincipal, marginBottom: 6 }]} numberOfLines={2}>
-            Conteúdo: {item.conteudoMinistrado}
-          </Text>
+          <Text style={[styles.textoDetalhe, { color: tema.textoPrincipal, marginBottom: 6 }]} numberOfLines={2}>Conteúdo: {item.conteudoMinistrado}</Text>
         )}
         <View style={styles.rowPillsChamada}>
-          <View style={[styles.pillMini, { backgroundColor: '#2E7D3220' }]}>
-            <Text style={{ color: '#2E7D32', fontSize: 11, fontWeight: '700' }}>{item.presentes} P</Text>
-          </View>
-          <View style={[styles.pillMini, { backgroundColor: '#C6282820' }]}>
-            <Text style={{ color: '#C62828', fontSize: 11, fontWeight: '700' }}>{item.faltas} F</Text>
-          </View>
-          {item.justificadas > 0 && (
-            <View style={[styles.pillMini, { backgroundColor: '#EF6C0020' }]}>
-              <Text style={{ color: '#EF6C00', fontSize: 11, fontWeight: '700' }}>{item.justificadas} J</Text>
-            </View>
-          )}
+          <View style={[styles.pillMini, { backgroundColor: '#2E7D3220' }]}><Text style={{ color: '#2E7D32', fontSize: 11, fontWeight: '700' }}>{item.presentes} P</Text></View>
+          <View style={[styles.pillMini, { backgroundColor: '#C6282820' }]}><Text style={{ color: '#C62828', fontSize: 11, fontWeight: '700' }}>{item.faltas} F</Text></View>
+          {item.justificadas > 0 && <View style={[styles.pillMini, { backgroundColor: '#EF6C0020' }]}><Text style={{ color: '#EF6C00', fontSize: 11, fontWeight: '700' }}>{item.justificadas} J</Text></View>}
           <View style={{ flex: 1 }} />
           <Text style={{ color: tema.botaoPrimario, fontSize: 11, fontWeight: '700' }}>Ver chamada {'>'}</Text>
         </View>
@@ -358,9 +331,7 @@ export default function HistoricoScreen() {
   const renderBoletim = (item: any, isFlat = true) => {
     const somaNotas = item.avaliacoes.reduce((acc: number, a: any) => acc + a.nota, 0);
     const somaMax = item.avaliacoes.reduce((acc: number, a: any) => acc + a.max, 0);
-    const percentual = somaMax > 0 ? (somaNotas / somaMax) * 100 : 0;
-    const isAprovado = percentual >= 60;
-
+    const isAprovado = somaMax > 0 && (somaNotas / somaMax) * 100 >= 60;
     return (
       <View key={item.id} style={[styles.cardItem, { backgroundColor: tema.inputBackground, borderColor: tema.borda, marginBottom: isFlat ? 14 : 10 }]}>
         <View style={styles.linhaCabecalho}>
@@ -374,9 +345,7 @@ export default function HistoricoScreen() {
             </View>
           </View>
           <View style={[styles.badgeMedia, { backgroundColor: isAprovado ? '#2E7D3220' : '#C6282820' }]}>
-            <Text style={[styles.textoMedia, { color: isAprovado ? '#2E7D32' : '#C62828' }]}>
-              {somaNotas.toFixed(1)} / {somaMax.toFixed(1)}
-            </Text>
+            <Text style={[styles.textoMedia, { color: isAprovado ? '#2E7D32' : '#C62828' }]}>{somaNotas.toFixed(1)} / {somaMax.toFixed(1)}</Text>
           </View>
         </View>
         <View style={[styles.gradeNotas, { borderTopColor: tema.borda }]}>
@@ -420,8 +389,10 @@ export default function HistoricoScreen() {
     ? (abaAtiva === 'auditoria' ? renderLogSistema : renderChamadoEncerrado)
     : (abaAtiva === 'frequencia' ? renderChamada : renderPasta);
 
+  // === INTERFACE ===
   return (
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: tema.fundoBase }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {/* Cabeçalho, Abas e Filtros */}
       <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
         <View style={styles.topoCabecalho}>
           <TouchableOpacity onPress={voltarTela} style={styles.btnVoltar} activeOpacity={0.7} accessibilityLabel="Voltar">
@@ -434,16 +405,14 @@ export default function HistoricoScreen() {
             </Text>
           </View>
         </View>
-
         <View style={styles.tabContainer}>
-          <TouchableOpacity style={[styles.tabButton, abaPrimaria && { backgroundColor: 'rgba(255,255,255,0.22)' }]} onPress={() => { setAbaAtiva(isAdmin ? 'auditoria' : 'frequencia'); setBusca(''); setDropdownAulaAberto(false); }}>
+          <TouchableOpacity style={[styles.tabButton, abaPrimaria && styles.tabButtonAtiva]} onPress={() => { setAbaAtiva(isAdmin ? 'auditoria' : 'frequencia'); setBusca(''); setDropdownAulaAberto(false); }}>
             <Text style={[styles.tabText, { color: tema.textoLogo, opacity: abaPrimaria ? 1 : 0.65 }]}>{isAdmin ? 'Log de Auditoria' : 'Diários de Classe'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.tabButton, !abaPrimaria && { backgroundColor: 'rgba(255,255,255,0.22)' }]} onPress={() => { setAbaAtiva(isAdmin ? 'chamados' : 'notas'); setBusca(''); setDropdownAulaAberto(false); }}>
+          <TouchableOpacity style={[styles.tabButton, !abaPrimaria && styles.tabButtonAtiva]} onPress={() => { setAbaAtiva(isAdmin ? 'chamados' : 'notas'); setBusca(''); setDropdownAulaAberto(false); }}>
             <Text style={[styles.tabText, { color: tema.textoLogo, opacity: !abaPrimaria ? 1 : 0.65 }]}>{isAdmin ? 'Chamados Encerrados' : 'Alunos e Notas'}</Text>
           </TouchableOpacity>
         </View>
-
         <View style={[styles.searchContainer, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
           <Ionicons name="search" size={20} color={tema.textoSecundario} style={styles.searchIcon} />
           <TextInput
@@ -454,7 +423,6 @@ export default function HistoricoScreen() {
             onChangeText={setBusca}
           />
         </View>
-
         {!isAdmin && abaAtiva === 'frequencia' && (
           <View style={{ marginTop: 10 }}>
             <View style={styles.rowFiltroPrensado}>
@@ -470,43 +438,23 @@ export default function HistoricoScreen() {
                   onChangeText={v => setFiltroData(formatarInputDataFiltro(v))}
                 />
                 {!!filtroData && (
-                  <TouchableOpacity onPress={() => setFiltroData('')}>
-                    <Ionicons name="close-circle" size={16} color={tema.textoSecundario} />
-                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setFiltroData('')}><Ionicons name="close-circle" size={16} color={tema.textoSecundario} /></TouchableOpacity>
                 )}
               </View>
-
-              <TouchableOpacity
-                style={[styles.filtroAulaBox, { backgroundColor: tema.inputBackground, borderColor: filtroAula || dropdownAulaAberto ? tema.botaoPrimario : tema.borda }]}
-                onPress={() => setDropdownAulaAberto(!dropdownAulaAberto)}
-              >
+              <TouchableOpacity style={[styles.filtroAulaBox, { backgroundColor: tema.inputBackground, borderColor: filtroAula || dropdownAulaAberto ? tema.botaoPrimario : tema.borda }]} onPress={() => setDropdownAulaAberto(!dropdownAulaAberto)}>
                 <Ionicons name="school-outline" size={16} color={tema.botaoPrimario} />
-                <Text style={{ color: filtroAula ? tema.textoPrincipal : tema.textoSecundario, fontSize: 12, fontWeight: filtroAula ? '600' : '400', flex: 1 }} numberOfLines={1}>
-                  {filtroAula || 'Aula / Turma'}
-                </Text>
+                <Text style={{ color: filtroAula ? tema.textoPrincipal : tema.textoSecundario, fontSize: 12, fontWeight: filtroAula ? '600' : '400', flex: 1 }} numberOfLines={1}>{filtroAula || 'Aula / Turma'}</Text>
                 <Ionicons name={dropdownAulaAberto ? 'chevron-up' : 'chevron-down'} size={16} color={tema.textoSecundario} />
               </TouchableOpacity>
             </View>
-
             {dropdownAulaAberto && (
               <View style={[styles.dropdownAulaLista, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
-                <TouchableOpacity
-                  style={[styles.dropdownAulaItem, { borderBottomColor: tema.borda }]}
-                  onPress={() => { setFiltroAula(''); setDropdownAulaAberto(false); }}
-                >
-                  <Text style={{ color: !filtroAula ? tema.botaoPrimario : tema.textoPrincipal, fontSize: 12, fontWeight: !filtroAula ? '700' : '500' }}>
-                    Todas as aulas / turmas
-                  </Text>
+                <TouchableOpacity style={[styles.dropdownAulaItem, { borderBottomColor: tema.borda }]} onPress={() => { setFiltroAula(''); setDropdownAulaAberto(false); }}>
+                  <Text style={{ color: !filtroAula ? tema.botaoPrimario : tema.textoPrincipal, fontSize: 12, fontWeight: !filtroAula ? '700' : '500' }}>Todas as aulas / turmas</Text>
                 </TouchableOpacity>
                 {opcoesAula.map(aula => (
-                  <TouchableOpacity
-                    key={aula}
-                    style={[styles.dropdownAulaItem, { borderBottomColor: tema.borda }]}
-                    onPress={() => { setFiltroAula(aula); setDropdownAulaAberto(false); }}
-                  >
-                    <Text style={{ color: filtroAula === aula ? tema.botaoPrimario : tema.textoPrincipal, fontSize: 12, fontWeight: filtroAula === aula ? '700' : '500' }}>
-                      {aula}
-                    </Text>
+                  <TouchableOpacity key={aula} style={[styles.dropdownAulaItem, { borderBottomColor: tema.borda }]} onPress={() => { setFiltroAula(aula); setDropdownAulaAberto(false); }}>
+                    <Text style={{ color: filtroAula === aula ? tema.botaoPrimario : tema.textoPrincipal, fontSize: 12, fontWeight: filtroAula === aula ? '700' : '500' }}>{aula}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -515,8 +463,9 @@ export default function HistoricoScreen() {
         )}
       </View>
 
+      {/* Lista de Registros */}
       {carregando ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={styles.centro}>
           <ActivityIndicator size="large" color={tema.botaoPrimario} />
           <Text style={{ marginTop: 10, color: tema.textoSecundario }}>Carregando registros...</Text>
         </View>
@@ -545,7 +494,7 @@ export default function HistoricoScreen() {
             ) : undefined
           }
           ListEmptyComponent={
-            <View style={{ alignItems: 'center', marginTop: 40 }}>
+            <View style={styles.vazioBox}>
               <Ionicons name="search-outline" size={44} color={tema.textoSecundario} />
               <Text style={{ textAlign: 'center', marginTop: 12, color: tema.textoPrincipal, fontWeight: '700', fontSize: 15 }}>
                 {isBuscando ? 'Nenhum resultado encontrado' : 'Nenhum registro disponível'}
@@ -558,24 +507,19 @@ export default function HistoricoScreen() {
         />
       )}
 
-      {/* MODAL: CONSULTA DETALHADA DO DIÁRIO DE CLASSE */}
+      {/* Modal: Consulta Detalhada do Diário de Classe */}
       <Modal visible={diarioSelecionado !== null} transparent animationType="slide" onRequestClose={() => setDiarioSelecionado(null)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
             <View style={[styles.modalHeader, { borderBottomColor: tema.borda }]}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>
-                  {diarioSelecionado?.rotuloAula || diarioSelecionado?.turmaNome}
-                </Text>
+                <Text style={[styles.modalTitulo, { color: tema.textoPrincipal }]}>{diarioSelecionado?.rotuloAula || diarioSelecionado?.turmaNome}</Text>
                 <Text style={{ color: tema.textoSecundario, fontSize: 12, marginTop: 2 }}>
                   {diarioSelecionado?.dataFormatada}{diarioSelecionado?.horario ? ` • ${diarioSelecionado.horario}` : ''}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => setDiarioSelecionado(null)}>
-                <Ionicons name="close" size={24} color={tema.textoSecundario} />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setDiarioSelecionado(null)}><Ionicons name="close" size={24} color={tema.textoSecundario} /></TouchableOpacity>
             </View>
-
             {diarioSelecionado && (
               <ScrollView contentContainerStyle={{ padding: 20 }}>
                 <View style={styles.resumoRow}>
@@ -592,18 +536,15 @@ export default function HistoricoScreen() {
                     <Text style={{ color: tema.textoSecundario, fontSize: 11 }}>Justificadas</Text>
                   </View>
                 </View>
-
                 {!!diarioSelecionado.conteudoMinistrado && (
                   <View style={[styles.boxConteudoModal, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
                     <Text style={{ color: tema.textoSecundario, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>CONTEÚDO MINISTRADO</Text>
                     <Text style={{ color: tema.textoPrincipal, fontSize: 13, lineHeight: 19 }}>{diarioSelecionado.conteudoMinistrado}</Text>
                   </View>
                 )}
-
                 <Text style={{ color: tema.textoSecundario, fontSize: 12, fontWeight: '700', marginBottom: 10 }}>
                   Lista de Frequência ({diarioSelecionado.alunos?.length || 0} aluno(s))
                 </Text>
-
                 {(diarioSelecionado.alunos || []).map((a: any, idx: number) => {
                   const st = a.status || (Array.isArray(a.presencas) && a.presencas.some((p: boolean) => !p) ? 'falta' : 'presente');
                   const cor = st === 'falta' ? '#C62828' : st === 'justificada' ? '#EF6C00' : '#2E7D32';
@@ -629,18 +570,23 @@ export default function HistoricoScreen() {
   );
 }
 
+// === ESTILOS ===
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  centro: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  vazioBox: { alignItems: 'center', marginTop: 40 },
   header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 20, elevation: 5, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
   topoCabecalho: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   btnVoltar: { paddingTop: 3, paddingRight: 4 },
   tituloHeader: { fontSize: 22, fontWeight: 'bold' },
   subtituloHeader: { fontSize: 12, opacity: 0.85, marginBottom: 14, marginTop: 2 },
-  tabContainer: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 4, marginBottom: 14 },
+  tabContainer: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 10, padding: 4, marginBottom: 14 },
   tabButton: { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 8 },
+  tabButtonAtiva: { backgroundColor: 'rgba(124, 124, 255, 0.28)', borderWidth: 1, borderColor: 'rgba(165, 158, 196, 0.25)' },
   tabText: { fontSize: 13, fontWeight: 'bold' },
   searchContainer: { flexDirection: 'row', alignItems: 'center', height: 44, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10 },
-  searchIcon: { marginRight: 8 }, searchInput: { flex: 1, height: '100%', fontSize: 14 },
+  searchIcon: { marginRight: 8 },
+  searchInput: { flex: 1, height: '100%', fontSize: 14 },
   rowFiltroPrensado: { flexDirection: 'row', gap: 8 },
   filtroDataBox: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, height: 38, borderRadius: 8, borderWidth: 1, paddingHorizontal: 10 },
   inputFiltroCurto: { flex: 1, height: '100%', fontSize: 12 },

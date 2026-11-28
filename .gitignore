@@ -8,7 +8,7 @@ dist/
 web-build/
 expo-env.d.ts
 
-# Native
+# Native & Builds
 .kotlin/
 *.orig.*
 *.jks
@@ -16,6 +16,9 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+*.apk
+*.aab
+*.ipa
 
 # Metro
 .metro-health-check*
@@ -32,10 +35,10 @@ yarn-error.*
 # Windows
 Thumbs.db
 
-# Local env files
+# Local env files & Firebase keys
 .env
 .env*.local
-.env.*.local
+serviceAccountKey.json
 
 # TypeScript
 *.tsbuildinfo

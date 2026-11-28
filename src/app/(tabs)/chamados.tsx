@@ -7,6 +7,7 @@ import { db } from '../../config/firebase';
 import { useDemoProfile } from '../../contexts/demoProfileContext';
 import { FeedbackToast, type EstadoFeedback, type TipoFeedback } from '../../components/FeedbackToast';
 
+// === TIPOS E CONSTANTES ===
 type StatusChamado = 'pendente' | 'em_andamento' | 'resolvido';
 type FiltroStatus = 'Todos' | 'Pendentes' | 'Em Andamento' | 'Resolvidos';
 
@@ -27,12 +28,8 @@ const FILTROS_STATUS: FiltroStatus[] = ['Todos', 'Pendentes', 'Em Andamento', 'R
 const CATEGORIAS = ['Acesso / Senha', 'Sistema / Bug', 'Turmas / Diário', 'Infraestrutura'] as const;
 const NOMES_PERFIS = { admin: 'Marina Andrade (Admin)', coordenador: 'Camila Rocha (Coordenadora)', professor: 'Luffy Baiano (Professor)' };
 const ORDEM_STATUS: Record<StatusChamado, number> = { pendente: 0, em_andamento: 1, resolvido: 2 };
-const CONFIG_STATUS: Record<StatusChamado, { label: string; cor: string; bg: string; icone: keyof typeof Ionicons.glyphMap }> = {
-  pendente: { label: 'PENDENTE', cor: '#EF6C00', bg: '#FFF3E0', icone: 'alert-circle' },
-  em_andamento: { label: 'EM ANDAMENTO', cor: '#1565C0', bg: '#E3F2FD', icone: 'time' },
-  resolvido: { label: 'RESOLVIDO', cor: '#2E7D32', bg: '#E8F5E9', icone: 'checkmark-circle' },
-};
 
+// === HELPERS ===
 const normalizarStatus = (raw: unknown): StatusChamado => {
   const s = String(raw || '').toLowerCase();
   if (['resolvido', 'encerrado', 'concluido'].includes(s)) return 'resolvido';
@@ -52,6 +49,7 @@ export default function ChamadosScreen() {
   const { perfil, temaAtivo: tema } = useDemoProfile();
   const isAdmin = perfil === 'admin';
 
+  // === ESTADOS ===
   const [chamados, setChamados] = useState<ChamadoItem[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -69,6 +67,13 @@ export default function ChamadosScreen() {
   const fecharFeedback = useCallback(() => setFeedback(prev => ({ ...prev, visivel: false })), []);
   const voltar = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
 
+  const configStatus = useMemo<Record<StatusChamado, { label: string; cor: string; icone: keyof typeof Ionicons.glyphMap }>>(() => ({
+    pendente: { label: 'PENDENTE', cor: '#EF6C00', icone: 'alert-circle' },
+    em_andamento: { label: 'EM ANDAMENTO', cor: tema.botaoPrimario, icone: 'time' },
+    resolvido: { label: 'RESOLVIDO', cor: '#2E7D32', icone: 'checkmark-circle' },
+  }), [tema.botaoPrimario]);
+
+  // === CARREGAMENTO E AÇÕES (FIRESTORE) ===
   const buscarChamados = useCallback(async () => {
     setCarregando(true);
     try {
@@ -163,32 +168,28 @@ export default function ChamadosScreen() {
     }
   };
 
+  // === FILTROS E RESUMO ===
   const chamadosFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     return chamados.filter(c => {
       if (filtroStatus === 'Pendentes' && c.status !== 'pendente') return false;
       if (filtroStatus === 'Em Andamento' && c.status !== 'em_andamento') return false;
       if (filtroStatus === 'Resolvidos' && c.status !== 'resolvido') return false;
-      return !termo || c.titulo.toLowerCase().includes(termo) || c.descricao.toLowerCase().includes(termo) || c.solicitante.toLowerCase().includes(termo);
+      return !termo || [c.titulo, c.descricao, c.solicitante].some(v => v.toLowerCase().includes(termo));
     });
   }, [busca, chamados, filtroStatus]);
 
   const resumo = useMemo(() => ([
     { icone: 'alert-circle-outline' as const, valor: chamados.filter(c => c.status === 'pendente').length, label: 'Pendentes', cor: '#EF6C00' },
-    { icone: 'time-outline' as const, valor: chamados.filter(c => c.status === 'em_andamento').length, label: 'Andamento', cor: '#1565C0' },
+    { icone: 'time-outline' as const, valor: chamados.filter(c => c.status === 'em_andamento').length, label: 'Andamento', cor: tema.botaoPrimario },
     { icone: 'checkmark-done-outline' as const, valor: chamados.filter(c => c.status === 'resolvido').length, label: 'Resolvidos', cor: '#2E7D32' },
-  ]), [chamados]);
+  ]), [chamados, tema.botaoPrimario]);
 
-  const toastProps = {
-    feedback,
-    onFechar: fecharFeedback,
-    fundoCard: tema.fundoTopo,
-    textoPrincipal: tema.textoPrincipal,
-    textoSecundario: tema.textoSecundario,
-  };
+  const toastProps = { feedback, onFechar: fecharFeedback, fundoCard: tema.fundoTopo, textoPrincipal: tema.textoPrincipal, textoSecundario: tema.textoSecundario };
 
+  // === RENDERIZADORES ===
   const renderChamado = ({ item }: { item: ChamadoItem }) => {
-    const cfg = CONFIG_STATUS[item.status];
+    const cfg = configStatus[item.status];
     return (
       <TouchableOpacity style={[styles.cardChamado, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]} activeOpacity={0.75} onPress={() => abrirDetalhes(item)}>
         <View style={styles.linhaTopoCard}>
@@ -196,7 +197,9 @@ export default function ChamadosScreen() {
             <Ionicons name={cfg.icone} size={18} color={cfg.cor} style={{ marginRight: 8 }} />
             <Text style={[styles.tituloCard, { color: tema.textoPrincipal }]} numberOfLines={1}>{item.titulo}</Text>
           </View>
-          <View style={[styles.badgeStatus, { backgroundColor: cfg.bg }]}><Text style={[styles.textoBadge, { color: cfg.cor }]}>{cfg.label}</Text></View>
+          <View style={[styles.badgeStatus, { backgroundColor: cfg.cor + '20' }]}>
+            <Text style={[styles.textoBadge, { color: cfg.cor }]}>{cfg.label}</Text>
+          </View>
         </View>
         <Text style={[styles.descricaoPreview, { color: tema.textoSecundario }]} numberOfLines={2}>{item.descricao}</Text>
         <View style={[styles.rodapeCard, { borderTopColor: tema.borda }]}>
@@ -211,8 +214,10 @@ export default function ChamadosScreen() {
     );
   };
 
+  // === INTERFACE ===
   return (
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: tema.fundoBase }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {/* Cabeçalho, Filtros e Busca */}
       <View style={[styles.header, { backgroundColor: tema.fundoTopo }]}>
         <View style={styles.topoLinha}>
           <View style={styles.rowHeaderEsq}>
@@ -223,28 +228,27 @@ export default function ChamadosScreen() {
             </View>
           </View>
           <TouchableOpacity style={[styles.btnAddTopo, { backgroundColor: tema.botaoPrimario }]} onPress={() => setModalNovo(true)}>
-            <Ionicons name="add" size={18} color="#FFF" />
-            <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '700' }}>Novo</Text>
+            <Ionicons name="add" size={18} color={tema.textoBotao} />
+            <Text style={{ color: tema.textoBotao, fontSize: 12, fontWeight: '700' }}>Novo</Text>
           </TouchableOpacity>
         </View>
-
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtrosRow}>
           {FILTROS_STATUS.map(f => {
             const ativo = filtroStatus === f;
             return (
-              <TouchableOpacity key={f} onPress={() => setFiltroStatus(f)} style={[styles.chipFiltro, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: tema.borda }]}>
-                <Text style={{ color: ativo ? '#FFF' : tema.textoPrincipal, fontSize: 12, fontWeight: '600' }}>{f}</Text>
+              <TouchableOpacity key={f} onPress={() => setFiltroStatus(f)} style={[styles.chipFiltro, { backgroundColor: ativo ? tema.botaoPrimario : tema.inputBackground, borderColor: ativo ? tema.botaoPrimario : tema.borda }]}>
+                <Text style={{ color: ativo ? tema.textoBotao : tema.textoPrincipal, fontSize: 12, fontWeight: '600' }}>{f}</Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
-
         <View style={[styles.searchContainer, { backgroundColor: tema.inputBackground, borderColor: tema.borda }]}>
           <Ionicons name="search" size={20} color={tema.textoSecundario} style={{ marginRight: 8 }} />
           <TextInput style={[styles.searchInput, { color: tema.textoPrincipal }]} placeholder="Buscar por solicitante, título ou problema..." placeholderTextColor={tema.textoSecundario} value={busca} onChangeText={setBusca} />
         </View>
       </View>
 
+      {/* Lista de Chamados */}
       {carregando ? (
         <View style={styles.centro}>
           <ActivityIndicator size="large" color={tema.botaoPrimario} />
@@ -278,6 +282,7 @@ export default function ChamadosScreen() {
         />
       )}
 
+      {/* Modal: Detalhes e Auditoria */}
       <Modal visible={selecionado !== null} transparent animationType="slide" onRequestClose={() => setSelecionado(null)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -288,8 +293,8 @@ export default function ChamadosScreen() {
             {selecionado && (
               <ScrollView contentContainerStyle={{ padding: 20 }} keyboardShouldPersistTaps="handled">
                 <View style={styles.linhaStatusModal}>
-                  <View style={[styles.badgeStatus, { backgroundColor: CONFIG_STATUS[selecionado.status].bg }]}>
-                    <Text style={[styles.textoBadge, { color: CONFIG_STATUS[selecionado.status].cor }]}>{CONFIG_STATUS[selecionado.status].label}</Text>
+                  <View style={[styles.badgeStatus, { backgroundColor: configStatus[selecionado.status].cor + '20' }]}>
+                    <Text style={[styles.textoBadge, { color: configStatus[selecionado.status].cor }]}>{configStatus[selecionado.status].label}</Text>
                   </View>
                   <Text style={{ color: tema.textoSecundario, fontSize: 12 }}>Aberto em {selecionado.dataFormatada}</Text>
                 </View>
@@ -326,9 +331,9 @@ export default function ChamadosScreen() {
                     <TextInput value={notaResolucao} onChangeText={setNotaResolucao} placeholder="Descreva o procedimento feito para resolver o problema..." placeholderTextColor={tema.textoSecundario} multiline numberOfLines={4} textAlignVertical="top" style={[styles.textArea, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]} />
                     <View style={styles.linhaBotoesAcao}>
                       {selecionado.status === 'pendente' && (
-                        <TouchableOpacity style={[styles.btnAndamento, { backgroundColor: '#1565C020', borderColor: '#1565C0' }]} onPress={() => void atualizarStatusChamado('em_andamento')} disabled={salvando}>
-                          <Ionicons name="play-outline" size={18} color="#1565C0" />
-                          <Text style={{ color: '#1565C0', fontWeight: '700', fontSize: 13 }}>Iniciar</Text>
+                        <TouchableOpacity style={[styles.btnAndamento, { backgroundColor: tema.botaoPrimario + '20', borderColor: tema.botaoPrimario }]} onPress={() => void atualizarStatusChamado('em_andamento')} disabled={salvando}>
+                          <Ionicons name="play-outline" size={18} color={tema.botaoPrimario} />
+                          <Text style={{ color: tema.botaoPrimario, fontWeight: '700', fontSize: 13 }}>Iniciar</Text>
                         </TouchableOpacity>
                       )}
                       <TouchableOpacity style={[styles.btnResolver, { backgroundColor: '#2E7D32' }]} onPress={() => void atualizarStatusChamado('resolvido')} disabled={salvando}>
@@ -345,6 +350,7 @@ export default function ChamadosScreen() {
         </View>
       </Modal>
 
+      {/* Modal: Abrir Novo Chamado */}
       <Modal visible={modalNovo} transparent animationType="slide" onRequestClose={() => setModalNovo(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalConteudo, { backgroundColor: tema.fundoBase, borderColor: tema.borda }]}>
@@ -369,7 +375,7 @@ export default function ChamadosScreen() {
               <Text style={[styles.labelCampo, { color: tema.textoSecundario }]}>Descrição do Problema</Text>
               <TextInput value={formNovo.descricao} onChangeText={v => setFormNovo(prev => ({ ...prev, descricao: v }))} placeholder="Explique o que aconteceu..." placeholderTextColor={tema.textoSecundario} multiline numberOfLines={4} textAlignVertical="top" style={[styles.textArea, { backgroundColor: tema.inputBackground, color: tema.textoPrincipal, borderColor: tema.borda }]} />
               <TouchableOpacity style={[styles.btnResolver, { backgroundColor: tema.botaoPrimario }]} onPress={() => void criarChamado()} disabled={salvando}>
-                <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>{salvando ? 'Enviando...' : 'Enviar Chamado'}</Text>
+                <Text style={{ color: tema.textoBotao, fontWeight: '700', fontSize: 14 }}>{salvando ? 'Enviando...' : 'Enviar Chamado'}</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -382,15 +388,18 @@ export default function ChamadosScreen() {
   );
 }
 
+// === ESTILOS ===
 const styles = StyleSheet.create({
-  container: { flex: 1 }, centro: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1 },
+  centro: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   rowFlex: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 },
   rowHeaderEsq: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   vazioBox: { alignItems: 'center', marginTop: 40 },
   auditoriaTopo: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 20, elevation: 5, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
   topoLinha: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  tituloHeader: { fontSize: 22, fontWeight: 'bold' }, subtituloHeader: { fontSize: 12, opacity: 0.8, marginTop: 2 },
+  tituloHeader: { fontSize: 22, fontWeight: 'bold' },
+  subtituloHeader: { fontSize: 12, opacity: 0.8, marginTop: 2 },
   btnAddTopo: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, gap: 4 },
   filtrosRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   chipFiltro: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
@@ -399,14 +408,17 @@ const styles = StyleSheet.create({
   listContent: { padding: 20, paddingBottom: 40 },
   resumoRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
   cardResumo: { flex: 1, borderWidth: 1, borderRadius: 12, padding: 12, alignItems: 'center' },
-  valorResumo: { fontSize: 20, fontWeight: 'bold', marginTop: 4 }, labelResumo: { fontSize: 11, marginTop: 2 },
+  valorResumo: { fontSize: 20, fontWeight: 'bold', marginTop: 4 },
+  labelResumo: { fontSize: 11, marginTop: 2 },
   cardChamado: { borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 12 },
   linhaTopoCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   tituloCard: { fontSize: 15, fontWeight: 'bold', flex: 1 },
-  badgeStatus: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }, textoBadge: { fontSize: 10, fontWeight: 'bold' },
+  badgeStatus: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  textoBadge: { fontSize: 10, fontWeight: 'bold' },
   descricaoPreview: { fontSize: 13, lineHeight: 18, marginBottom: 12 },
   rodapeCard: { flexDirection: 'row', alignItems: 'center', paddingTop: 10, borderTopWidth: 1 },
-  metaCard: { fontSize: 12, fontWeight: '500' }, metaData: { fontSize: 11, fontStyle: 'italic' },
+  metaCard: { fontSize: 12, fontWeight: '500' },
+  metaData: { fontSize: 11, fontStyle: 'italic' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   modalConteudo: { maxHeight: '88%', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, paddingBottom: 24 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1 },
@@ -414,7 +426,8 @@ const styles = StyleSheet.create({
   linhaStatusModal: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   tituloDetalhe: { fontSize: 18, fontWeight: 'bold', marginBottom: 14 },
   boxInfo: { borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 12 },
-  labelBox: { fontSize: 11, fontWeight: '700', marginBottom: 4, textTransform: 'uppercase' }, valorBox: { fontSize: 14 },
+  labelBox: { fontSize: 11, fontWeight: '700', marginBottom: 4, textTransform: 'uppercase' },
+  valorBox: { fontSize: 14 },
   boxAuditoria: { borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16 },
   labelCampo: { fontSize: 12, fontWeight: '700', marginBottom: 6, marginTop: 4 },
   inputModal: { borderWidth: 1, borderRadius: 10, height: 44, paddingHorizontal: 12, fontSize: 14, marginBottom: 14 },
